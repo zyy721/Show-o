@@ -340,5 +340,7 @@ if __name__ == '__main__':
             images = images.permute(0, 2, 3, 1).cpu().numpy().astype(np.uint8)
             pil_images = [Image.fromarray(image) for image in images]
 
+            # pil_images[0].save('tmp.jpg')
+
             wandb_images = [wandb.Image(image, caption=prompts[i]) for i, image in enumerate(pil_images)]
             wandb.log({"generated_images": wandb_images}, step=step)
