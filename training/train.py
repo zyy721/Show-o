@@ -271,7 +271,7 @@ def main():
         # dataset_config.train_t2i_shards_path_or_url,
         # image_size=preproc_config.resolution,
 
-        "/home/yzhu/ELM/data/nuscenes/nuscenes_infos_train_temporal_v3_scene.pkl",
+        "data/nuscenes/nuscenes_infos_train_temporal_v3_scene.pkl",
         image_size=256,
 
     )
@@ -498,6 +498,16 @@ def main():
         B, F = pixel_values_or_image_ids.shape[:2]
         pixel_values_or_image_ids = pixel_values_or_image_ids.view(-1, *pixel_values_or_image_ids.shape[2:])
         image_tokens = vq_model.get_code(pixel_values_or_image_ids)
+
+
+        # images = vq_model.decode_code(image_tokens)
+        # images = torch.clamp((images + 1.0) / 2.0, min=0.0, max=1.0)
+        # images *= 255.0
+        # images = images.permute(0, 2, 3, 1).cpu().numpy().astype(np.uint8)
+        # pil_images = [Image.fromarray(image) for image in images]
+        # pil_images[0].save('tmp.jpg')
+
+
         image_tokens = image_tokens + len(uni_prompting.text_tokenizer)
 
         image_tokens = image_tokens.view(B, F, image_tokens.shape[-1])

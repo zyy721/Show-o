@@ -195,6 +195,48 @@ class UniversalPrompting():
 
         return torch.cat(sequence_ids, dim=0), torch.cat(attention_masks, dim=0)
 
+    def video_pred_gen_prompt(self, text_ids, image_ids):
+
+        device = image_ids.device
+        sequence_ids = []
+        attention_masks = []
+        for i in range(len(text_ids)):
+            if len(text_ids[i]) == 0:
+                text_ids[i] = [self.text_tokenizer.bos_token_id]
+            elif text_ids[i][0] != self.text_tokenizer.bos_token_id:
+                text_ids[i] = [self.text_tokenizer.bos_token_id] + text_ids[i]
+            # note that, llama3 tokenizer automatically add the bot token at first but without eot
+            # temp_ids = [int(self.sptids_dict['<|t2i|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
+            temp_ids = [int(self.sptids_dict['<|v2v|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
+            if self.max_text_len >= len(temp_ids):
+                temp_ids = [self.pad_id] * (self.max_text_len - len(temp_ids)) + temp_ids
+                # temp_masks = [0] * (self.max_text_len - len(temp_ids)) + [1] * len(temp_ids)
+            else:
+                temp_ids = temp_ids[:self.max_text_len - 1] + [self.text_tokenizer.eos_token_id]
+                # temp_masks = [1] * len(temp_ids)  # +2 for two special tokens
+
+            # prompting -- [task token] [sot] [text tokens] [eot] [soi] [image tokens] [eoi]
+            # temp_ids = torch.cat([
+            #     torch.tensor(temp_ids).to(device),
+            #     self.sptids_dict['<|soi|>'].to(device),
+            #     image_ids[i],
+            #     self.sptids_dict['<|eoi|>'].to(device)
+            # ], dim=0)
+
+            temp_ids_list = [torch.tensor(temp_ids).to(device)]
+            for cur_frame in range(image_ids.shape[1]):
+                temp_ids_list.append(self.sptids_dict['<|soi|>'].to(device))
+                temp_ids_list.append(image_ids[i, cur_frame])
+                temp_ids_list.append(self.sptids_dict['<|eoi|>'].to(device))
+            temp_ids = torch.cat(temp_ids_list, dim=0)
+
+            # temp_masks = torch.tensor(temp_masks).to(device)
+            sequence_ids.append(temp_ids.unsqueeze(0))
+            # attention_masks.append(temp_masks.unsqueeze(0))
+
+        # return torch.cat(sequence_ids, dim=0), torch.cat(attention_masks, dim=0)
+        return torch.cat(sequence_ids, dim=0), attention_masks
+
     # language modeling
     def lm_prompt(self, text_ids, max_seq_len):
 
@@ -418,6 +460,12 @@ class UniversalPrompting():
             text_ids = self.text_tokenizer(input[0])['input_ids']  # (B, max_len)
             image_ids = input[1]  # (B, #tokens)
             sequence_ids_with_masks = self.t2i_gen_prompt(text_ids, image_ids)
+
+        elif task == "video_pred_gen":
+            # text_ids = self.text_tokenizer(input[0])['input_ids']  # (B, max_len)
+            text_ids = [[] for i in range(len(input[0]))]
+            image_ids = input[0]  # (B, #tokens)
+            sequence_ids_with_masks = self.video_pred_gen_prompt(text_ids, image_ids)
 
         elif task == "lm":
             text_ids = self.text_tokenizer(input[0], truncation=True)['input_ids']  # (B, max_len)

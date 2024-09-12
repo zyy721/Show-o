@@ -4,9 +4,9 @@ wandb:
   resume: 'auto'
 
 experiment:
-    project: "training"
-    name: "show-o-training-stage3"
-    output_dir: "show-o-training-stage3"
+    project: "tuning"
+    name: "show-o-tuning-stage2"
+    output_dir: "show-o-tuning-stage2"
     max_train_examples_t2i: 20000000
     max_train_examples_mmu: 40000000
     save_every: 10000
@@ -22,7 +22,9 @@ model:
         vq_model_name: "showlab/magvitv2"
 
     showo:
-        load_from_showo: False
+        # load_from_showo: False
+        load_from_showo: True
+
         pretrained_model_path: "showlab/show-o"
         w_clip_vit: False
         vocab_size: 58498
@@ -36,11 +38,12 @@ model:
 
 dataset:
     gen_type: "t2i"
-    und_type: "captioning"
-    combined_loader_mode: "max_size_cycle"
+    und_type: "llava_tuning"
+    combined_loader_mode: "min_size"
+    add_system_prompt: False
     params:
-        train_t2i_shards_path_or_url: ["/mnt/bn/vgfm/laion5b/laion-aesthetics-12m-images/{00000..01209}.tar",
-                                    "/mnt/bn/vgfm/JourneyDB/JourneyDB/data/train/imgs/{000..199}.tgz" ]
+        train_t2i_shards_path_or_url: [ "/mnt/bn/vgfm/laion5b/laion-aesthetics-12m-images/{00000..01209}.tar",
+                                      "/mnt/bn/vgfm/JourneyDB/JourneyDB/data/train/imgs/{000..199}.tgz" ]
         train_mmu_shards_path_or_url: [ "/mnt/bn/vgfm2/test_mlx/xavier/data/SA1B2/sa_{000000..000999}.tar",
                                         "/mnt/bn/vgfm/cc12m/images/{00000..01242}.tar",
                                         "/mnt/bn/vgfm/laion5b/laion-aesthetics-12m-images/{00000..01209}.tar" ]
@@ -52,13 +55,16 @@ dataset:
         external_cc12m_caption_path: '/mnt/bn/vgfm/cc12m/captions/'
         validation_prompts_file: "validation_prompts/showoprompts.txt"
         shuffle_buffer_size: 1000
-        num_workers: 32
+        # num_workers: 32
+        num_workers: 4
+
         resolution: 256
         pin_memory: True
         persistent_workers: True
 
     preprocessing:
-        max_seq_length: 128 # for text tokens
+        # max_seq_length: 381 # for text tokens
+        max_seq_length: 2 # for text tokens
         resolution: 256
         center_crop: False
         random_flip: False
@@ -66,7 +72,7 @@ dataset:
 optimizer:
     name: adamw
     params: # default adamw params
-        learning_rate: 1e-4
+        learning_rate: 5e-05
         scale_lr: False # scale learning rate by total batch size
         beta1: 0.9
         beta2: 0.999
@@ -81,11 +87,11 @@ lr_scheduler:
 
 training:
     gradient_accumulation_steps: 1
-    # batch_size_t2i: 10
+    # batch_size_t2i: 4
     batch_size_t2i: 2
 
-    batch_size_lm: 4
-    batch_size_mmu: 10
+    batch_size_lm: 2
+    batch_size_mmu: 6
     mixed_precision: "bf16"
     enable_tf32: True
     seed: 10086

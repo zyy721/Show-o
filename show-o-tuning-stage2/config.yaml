@@ -1,11 +1,11 @@
 wandb:
   entity: null
   resume: auto
-  run_id: 0rwv54o7
+  run_id: xyt6gozk
 experiment:
-  project: training
-  name: show-o-training-stage3
-  output_dir: show-o-training-stage3
+  project: tuning
+  name: show-o-tuning-stage2
+  output_dir: show-o-tuning-stage2
   max_train_examples_t2i: 20000000
   max_train_examples_mmu: 40000000
   save_every: 10000
@@ -14,13 +14,13 @@ experiment:
   log_every: 50
   log_grad_norm_every: 500
   resume_from_checkpoint: latest
-  logging_dir: show-o-training-stage3/logs
+  logging_dir: show-o-tuning-stage2/logs
 model:
   vq_model:
     type: magvitv2
     vq_model_name: showlab/magvitv2
   showo:
-    load_from_showo: false
+    load_from_showo: true
     pretrained_model_path: showlab/show-o
     w_clip_vit: false
     vocab_size: 58498
@@ -32,8 +32,9 @@ model:
   gradient_checkpointing: true
 dataset:
   gen_type: t2i
-  und_type: captioning
-  combined_loader_mode: max_size_cycle
+  und_type: llava_tuning
+  combined_loader_mode: min_size
+  add_system_prompt: false
   params:
     train_t2i_shards_path_or_url:
     - /mnt/bn/vgfm/laion5b/laion-aesthetics-12m-images/{00000..01209}.tar
@@ -50,19 +51,19 @@ dataset:
     external_cc12m_caption_path: /mnt/bn/vgfm/cc12m/captions/
     validation_prompts_file: validation_prompts/showoprompts.txt
     shuffle_buffer_size: 1000
-    num_workers: 32
+    num_workers: 4
     resolution: 256
     pin_memory: true
     persistent_workers: true
   preprocessing:
-    max_seq_length: 128
+    max_seq_length: 10
     resolution: 256
     center_crop: false
     random_flip: false
 optimizer:
   name: adamw
   params:
-    learning_rate: 0.0001
+    learning_rate: 5.0e-05
     scale_lr: false
     beta1: 0.9
     beta2: 0.999
@@ -76,8 +77,8 @@ lr_scheduler:
 training:
   gradient_accumulation_steps: 1
   batch_size_t2i: 2
-  batch_size_lm: 4
-  batch_size_mmu: 10
+  batch_size_lm: 2
+  batch_size_mmu: 6
   mixed_precision: bf16
   enable_tf32: true
   seed: 10086
@@ -92,4 +93,4 @@ training:
   t2i_coeff: 1.0
   lm_coeff: 0.1
   mmu_coeff: 1.0
-config: configs/showo_pretraining_stage3_pred_video.yaml
+config: configs/showo_tuning_pred_video.yaml
