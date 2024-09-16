@@ -20,6 +20,9 @@ from .modeling_utils import ConfigMixin, ModelMixin, register_to_config
 from .sampling import cosine_schedule, mask_by_random_topk
 from .phi import PhiForCausalLM
 
+from torch import nn
+
+
 class Showo(ModelMixin, ConfigMixin):
     _supports_gradient_checkpointing = True
 
@@ -53,12 +56,20 @@ class Showo(ModelMixin, ConfigMixin):
                 torch.nn.Linear(2048, 2048)
             )
 
+        ###################################
+        # self.ego_pose_embed_tokens = nn.Linear(2, config.hidden_size, bias=False)
+        ###################################
+        
+
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = True
 
     def forward(
             self,
             input_ids,
+
+            # gt_ego_pose,
+
             input_embeddings=None,
             attention_mask=None,
             labels=None,
@@ -71,6 +82,12 @@ class Showo(ModelMixin, ConfigMixin):
             labels_mask_image=None,
             **kwargs,
     ):
+        ############################
+        # inputs_embeds = self.showo.model.embed_tokens(input_ids)
+        # ego_pose_embdes = self.ego_pose_embed_tokens(gt_ego_pose)
+        
+        ############################
+
 
         if input_embeddings is None:
             logits = self.showo(input_ids=input_ids, attention_mask=attention_mask)['logits']

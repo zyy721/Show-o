@@ -23,6 +23,10 @@ model:
         num_vq_tokens: 256
         num_new_special_tokens: 10  # <|soi|> <|eoi|> <|sov|> <|eov|> <|t2i|> <|mmu|> <|t2v|> <|v2v|> <|lvg|> <|pad|>
 
+        resume_model_path: "show-o-tuning-stage2/checkpoint-9000"
+        # resume_model_path: "show-o-tuning-stage2/checkpoint-30000"
+
+
     gradient_checkpointing: True
 
 dataset:

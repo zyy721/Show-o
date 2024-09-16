@@ -15,7 +15,7 @@
             "name": "Python: Current File",
             "type": "python",
             "request": "attach",
-            "port": 2377,
+            "port": 2378,
             "host": "localhost",
             "pathMappings": [
                 {
