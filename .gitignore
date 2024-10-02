@@ -1,4 +1,9 @@
 __pycache__
 ./data
 ./wandb
-./show-o-*
+./show-o-training-stage3
+./show-o-tuning-drivelm  
+./show-o-tuning-stage2
+./show-o-tuning-stage2-mix-modality
+./show-o-tuning-stage2-pred-2-frames 
+./show-o-tuning-stage2-pred-indep-2-frames

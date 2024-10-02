@@ -45,6 +45,7 @@ from training.data import Text2ImageDataset
 from training.imagenet_dataset import ImageNetDataset
 # from parquet import RefinedWebDataset
 from training.nuscenes_dataset import nuscenesDataset
+from training.mix_modality_dataset import VideoPredMixModalityDataset
 
 # from models import Showo, MAGVITv2, VQ_16, get_mask_chedule
 from models import Showo, MAGVITv2, get_mask_chedule
@@ -57,6 +58,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from llava.llava_data_vq_unified import get_instruct_data_loader
+from training.drivelm_dataset import get_drivelm_data_loader
+from training.mix_modality_dataset import get_drivelm_mix_modality_data_loader, get_mix_modality_data_loader
 
 SYSTEM_PROMPT_LEN = 28
 
@@ -99,7 +102,7 @@ def main():
         mixed_precision=config.training.mixed_precision,
         log_with="wandb",
         project_dir=config.experiment.logging_dir,
-        split_batches=True,        
+        split_batches=True,
     )
 
     total_batch_size_per_gpu = (config.training.batch_size_t2i
@@ -267,11 +270,11 @@ def main():
 
     # Data for generation
 
-    dataset_imagenet = nuscenesDataset(
+    dataset_imagenet = VideoPredMixModalityDataset(
         # dataset_config.train_t2i_shards_path_or_url,
         # image_size=preproc_config.resolution,
 
-        "data/nuscenes/nuscenes_infos_train_temporal_v3_scene.pkl",
+        # "data/nuscenes/nuscenes_infos_train_temporal_v3_scene.pkl",
         image_size=256,
 
     )
@@ -400,6 +403,34 @@ def main():
     # else:
     #     raise NotImplementedError(f"Unsupported dataset type {config.dataset.und_type}")
 
+    total_batch_size_mmu_without_accum = config.training.batch_size_mmu * accelerator.num_processes
+    total_batch_size_mmu = (
+            config.training.batch_size_mmu * accelerator.num_processes * config.training.gradient_accumulation_steps
+    )
+
+    # train_dataloader_mmu, len_dataset_drivelm = get_drivelm_data_loader(
+    #     tokenizer,
+    #     batch_size=config.training.batch_size_mmu,
+    #     num_workers=dataset_config.num_workers,
+    #     world_size=accelerator.num_processes,
+    #     local_rank=accelerator.process_index,
+    #     max_length=preproc_config.max_seq_length if config.dataset.add_system_prompt else preproc_config.max_seq_length + SYSTEM_PROMPT_LEN,
+    #     phase="tuning"
+    # )
+
+    train_dataloader_mmu, len_dataset_drivelm = get_drivelm_mix_modality_data_loader(
+        tokenizer,
+        batch_size=config.training.batch_size_mmu,
+        num_workers=dataset_config.num_workers,
+        world_size=accelerator.num_processes,
+        local_rank=accelerator.process_index,
+        max_length=preproc_config.max_seq_length if config.dataset.add_system_prompt else preproc_config.max_seq_length + SYSTEM_PROMPT_LEN,
+        phase="tuning"
+    )
+
+    num_update_steps_per_epoch = math.ceil(len_dataset_drivelm / total_batch_size_mmu)
+    num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)
+
     # LLM pure text dataset: RefinedWeb
     # dataset_lm = RefinedWebDataset(data_path=dataset_config.train_lm_shards_path_or_url,
     #                                rank=accelerator.process_index,
@@ -414,7 +445,7 @@ def main():
     iterables = {
         "t2i_flow": train_dataloader_t2i,
         # "lm_flow": train_dataloader_lm,
-        # "mmu_flow": train_dataloader_mmu,
+        "mmu_flow": train_dataloader_mmu,
     }
 
     combined_dataloader = CombinedLoader(iterables, mode=config.dataset.combined_loader_mode)
@@ -492,14 +523,16 @@ def main():
             texts: Union[str, str],
             min_masking_rate: float = 0.0,
             is_train: bool = True,
+            bool_pad_image = None,
     ):
-        F_past = 2
-        F_future = 1
+        F_past = 3
+        F_future = 3
         B, F = pixel_values_or_image_ids.shape[:2]
-        pixel_values_or_image_ids = pixel_values_or_image_ids.view(-1, *pixel_values_or_image_ids.shape[2:])
-        image_tokens = vq_model.get_code(pixel_values_or_image_ids)
+        valid_pixel_values_or_image_ids = pixel_values_or_image_ids[~bool_pad_image]
+        valid_image_tokens = vq_model.get_code(valid_pixel_values_or_image_ids)
 
 
+        # image_tokens = valid_image_tokens
         # images = vq_model.decode_code(image_tokens)
         # images = torch.clamp((images + 1.0) / 2.0, min=0.0, max=1.0)
         # images *= 255.0
@@ -508,9 +541,10 @@ def main():
         # pil_images[0].save('tmp.jpg')
 
 
-        image_tokens = image_tokens + len(uni_prompting.text_tokenizer)
-
-        image_tokens = image_tokens.view(B, F, image_tokens.shape[-1])
+        valid_image_tokens = valid_image_tokens + len(uni_prompting.text_tokenizer)
+        pad_id=int(uni_prompting.sptids_dict['<|pad|>'])
+        image_tokens = pad_id + torch.zeros((B, F, valid_image_tokens.shape[-1]), device=valid_image_tokens.device, dtype=torch.long)
+        image_tokens[~bool_pad_image] = valid_image_tokens
         image_tokens_future = image_tokens[:, F_past:]
         image_tokens_future = image_tokens_future.view(-1, *image_tokens_future.shape[2:])
 
@@ -540,8 +574,7 @@ def main():
             is_train: bool = True,
     ):
         F_past = 2
-        # F_future = 1
-        F_future = 2
+        F_future = 1
         B, F = pixel_values_or_image_ids.shape[:2]
         pixel_values_or_image_ids = pixel_values_or_image_ids.view(-1, *pixel_values_or_image_ids.shape[2:])
         image_tokens = vq_model.get_code(pixel_values_or_image_ids)
@@ -589,16 +622,19 @@ def main():
             # for loss calculation
             batch_size_t2i = batch["t2i_flow"]["images"].shape[0]
             # batch_size_lm = len(batch["lm_flow"]["input_ids"])
-            # batch_size_mmu = batch["mmu_flow"]["images"].shape[0]
+            batch_size_mmu = batch["mmu_flow"]["images"].shape[0]
 
             # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
             # Build formatted sequences for class-conditional/text-to-image generation
             # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
             # pixel_values, texts = batch["t2i_flow"]["images"], batch["t2i_flow"]["input_ids"]
+            texts = None
             pixel_values = batch["t2i_flow"]["images"]
             pixel_values = pixel_values.to(accelerator.device, non_blocking=True)
-            gt_ego_poses = batch["t2i_flow"]["gt_ego_poses"]
-            gt_ego_poses = gt_ego_poses.to(accelerator.device, non_blocking=True)
+            bool_pad_image = batch["t2i_flow"]["bool_pad_image"]
+            bool_pad_image = bool_pad_image.to(accelerator.device, non_blocking=True)
+            # gt_ego_poses = batch["t2i_flow"]["gt_ego_poses"]
+            # gt_ego_poses = gt_ego_poses.to(accelerator.device, non_blocking=True)
             data_time_m.update(time.time() - end)
 
             # Encode images to image tokens, mask them and create input and labels
@@ -609,19 +645,19 @@ def main():
             #     image_tokens_ori
             # ) = prepare_inputs_and_labels(pixel_values, texts, config.training.min_masking_rate)
 
-            # (
-            #     input_ids,
-            #     labels,
-            #     mask_prob,
-            #     image_tokens_ori
-            # ) = prepare_inputs_and_labels_video_pred(pixel_values, config.training.min_masking_rate)
-
             (
                 input_ids,
                 labels,
                 mask_prob,
                 image_tokens_ori
-            ) = prepare_inputs_and_labels_video_pred_ego_pose(pixel_values, gt_ego_poses, config.training.min_masking_rate)
+            ) = prepare_inputs_and_labels_video_pred(pixel_values, texts, config.training.min_masking_rate, bool_pad_image=bool_pad_image)
+
+            # (
+            #     input_ids,
+            #     labels,
+            #     mask_prob,
+            #     image_tokens_ori
+            # ) = prepare_inputs_and_labels_video_pred_ego_pose(pixel_values, gt_ego_poses, config.training.min_masking_rate)
 
             attention_mask = create_attention_mask_predict_next(input_ids,
                                                                 pad_id=int(uni_prompting.sptids_dict['<|pad|>']),
@@ -648,49 +684,90 @@ def main():
             # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
             # Build formatted sequences for captioning/multimodal understanding
             # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
-            # if "llava" in config.dataset.und_type:
-            #     pixel_values_mmu, input_ids_mmu, labels_mmu = (batch["mmu_flow"]["images"],
-            #                                                    batch["mmu_flow"]["input_ids"],
-            #                                                    batch["mmu_flow"]["labels"])
-            #     pixel_values_mmu = pixel_values_mmu.to(accelerator.device, non_blocking=True)
-            #     input_ids_mmu = input_ids_mmu.to(accelerator.device, non_blocking=True)
-            #     image_tokens_mmu = vq_model.get_code(pixel_values_mmu)
-            #     image_tokens_mmu = image_tokens_mmu + len(uni_prompting.text_tokenizer)
+            if "llava" in config.dataset.und_type:
+                pixel_values_mmu, input_ids_mmu, labels_mmu, bool_pad_image_mmu = (batch["mmu_flow"]["images"],
+                                                                               batch["mmu_flow"]["input_ids"],
+                                                                               batch["mmu_flow"]["labels"],
+                                                                               batch["mmu_flow"]["bool_pad_image"])
+                pixel_values_mmu = pixel_values_mmu.to(accelerator.device, non_blocking=True)
+                input_ids_mmu = input_ids_mmu.to(accelerator.device, non_blocking=True)
+                bool_pad_image_mmu = bool_pad_image_mmu.to(accelerator.device, non_blocking=True)
 
-            #     input_ids_mmu = torch.cat([
-            #         (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.sptids_dict['<|mmu|>']).to(
-            #             accelerator.device),
-            #         (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.sptids_dict['<|soi|>']).to(
-            #             accelerator.device),
-            #         image_tokens_mmu,
-            #         (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.sptids_dict['<|eoi|>']).to(
-            #             accelerator.device),
-            #         input_ids_mmu,
-            #     ], dim=1).long()
 
-            #     labels_mmu = torch.cat([
-            #         (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device),
-            #         (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device),
-            #         torch.ones_like(image_tokens_mmu) * uni_prompting.ignore_id,
-            #         (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device),
-            #         labels_mmu.to(accelerator.device)
-            #     ], dim=1).long()
+                B_mmu, F_mmu = pixel_values_mmu.shape[:2]
+                valid_pixel_values_or_image_ids_mmu = pixel_values_mmu[~bool_pad_image_mmu]
+                valid_image_tokens_mmu = vq_model.get_code(valid_pixel_values_or_image_ids_mmu)
+                valid_image_tokens_mmu = valid_image_tokens_mmu + len(uni_prompting.text_tokenizer)
+                pad_id=int(uni_prompting.sptids_dict['<|pad|>'])
+                image_tokens_mmu = pad_id + torch.zeros((B_mmu, F_mmu, valid_image_tokens_mmu.shape[-1]), device=valid_image_tokens_mmu.device, dtype=torch.long)
+                image_tokens_mmu[~bool_pad_image_mmu] = valid_image_tokens_mmu
 
-            # else:
 
-            #     pixel_values_mmu, texts_mmu = batch["mmu_flow"]["images"], batch["mmu_flow"]["input_ids"]
-            #     pixel_values_mmu = pixel_values_mmu.to(accelerator.device, non_blocking=True)
-            #     image_tokens_mmu = vq_model.get_code(pixel_values_mmu)
-            #     image_tokens_mmu = image_tokens_mmu + len(uni_prompting.text_tokenizer)
-            #     input_ids_mmu, _, labels_mmu = uni_prompting((image_tokens_mmu, texts_mmu), 'mmu')
-            #     input_ids_mmu = input_ids_mmu.to(accelerator.device, non_blocking=True)
+                temp_ids = (torch.ones((B_mmu, 1), dtype=torch.long) * uni_prompting.sptids_dict['<|v2v|>']).to(accelerator.device)
+                temp_ids_list = [temp_ids]
+                for cur_frame in range(F_mmu):
+                    # temp_ids_list.append(uni_prompting['<|sot|>'].to(accelerator.device))
+                    # temp_ids_list.append(text_frame_id[cur_frame])
+                    # temp_ids_list.append(uni_prompting['<|eot|>'].to(accelerator.device))
+                    temp_ids_list.append((torch.ones((B_mmu, 1), dtype=torch.long) * uni_prompting.sptids_dict['<|soi|>']).to(accelerator.device))
+                    temp_ids_list.append(image_tokens_mmu[:, cur_frame])
+                    temp_ids_list.append((torch.ones((B_mmu, 1), dtype=torch.long) * uni_prompting.sptids_dict['<|eoi|>']).to(accelerator.device))
+                temp_ids_list.append(input_ids_mmu)
+                temp_ids = torch.cat(temp_ids_list, dim=1).long()
+                input_ids_mmu = temp_ids
 
-            # attention_mask_mmu = create_attention_mask_for_mmu(input_ids_mmu.to(input_ids.device),
-            #                                                    eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']))
-            # attention_mask_mmu = attention_mask_mmu.to(mask_dtype)
-            # attention_mask = torch.cat([attention_mask, attention_mask_mmu], dim=0)
-            # input_ids = torch.cat((input_ids, input_ids_mmu.to(input_ids.device)), dim=0)
-            # labels = torch.cat((labels, labels_mmu.to(input_ids.device)), dim=0)
+                ignore_id = (torch.ones((B_mmu, 1), dtype=torch.long) * uni_prompting.ignore_id).to(accelerator.device)
+                temp_label_ids_list = [ignore_id]
+                for cur_frame in range(F_mmu):
+                    # temp_label_ids_list.append(ignore_id)
+                    # temp_label_ids_list.append(ignore_id)
+                    # temp_label_ids_list.append(ignore_id)
+                    temp_label_ids_list.append((torch.ones((B_mmu, 1), dtype=torch.long) * uni_prompting.ignore_id).to(accelerator.device))
+                    temp_label_ids_list.append(torch.ones_like(image_tokens_mmu[:, cur_frame]) * uni_prompting.ignore_id)
+                    temp_label_ids_list.append((torch.ones((B_mmu, 1), dtype=torch.long) * uni_prompting.ignore_id).to(accelerator.device))
+                temp_label_ids_list.append(labels_mmu.to(accelerator.device))
+                temp_label_ids = torch.cat(temp_label_ids_list, dim=1).long()
+                temp_label_ids = torch.where(temp_label_ids == uni_prompting.pad_id, uni_prompting.ignore_id, temp_label_ids)
+                labels_mmu = temp_label_ids
+
+
+                # input_ids_mmu = torch.cat([
+                #     (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.sptids_dict['<|mmu|>']).to(
+                #         accelerator.device),
+                #     (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.sptids_dict['<|soi|>']).to(
+                #         accelerator.device),
+                #     image_tokens_mmu,
+                #     (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.sptids_dict['<|eoi|>']).to(
+                #         accelerator.device),
+                #     input_ids_mmu,
+                # ], dim=1).long()
+
+                # labels_mmu = torch.cat([
+                #     (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device),
+                #     (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device),
+                #     torch.ones_like(image_tokens_mmu) * uni_prompting.ignore_id,
+                #     (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device),
+                #     labels_mmu.to(accelerator.device)
+                # ], dim=1).long()
+
+            else:
+
+                pixel_values_mmu, texts_mmu = batch["mmu_flow"]["images"], batch["mmu_flow"]["input_ids"]
+                pixel_values_mmu = pixel_values_mmu.to(accelerator.device, non_blocking=True)
+                image_tokens_mmu = vq_model.get_code(pixel_values_mmu)
+                image_tokens_mmu = image_tokens_mmu + len(uni_prompting.text_tokenizer)
+                input_ids_mmu, _, labels_mmu = uni_prompting((image_tokens_mmu, texts_mmu), 'mmu')
+                input_ids_mmu = input_ids_mmu.to(accelerator.device, non_blocking=True)
+
+            attention_mask_mmu = create_attention_mask_for_mmu(input_ids_mmu.to(input_ids.device),
+                                                               eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']))
+            attention_mask = torch.cat([attention_mask, attention_mask_mmu], dim=0)
+            input_ids = torch.cat((input_ids, input_ids_mmu.to(input_ids.device)), dim=0)
+            labels = torch.cat((labels, labels_mmu.to(input_ids.device)), dim=0)
+
+            attention_mask = attention_mask_mmu
+            input_ids = input_ids_mmu 
+            labels = labels_mmu
 
             if global_step == 0 and epoch == 0:
                 logger.info("Input ids: {}".format(input_ids))
@@ -705,19 +782,20 @@ def main():
                     label_smoothing=config.training.label_smoothing,
                     batch_size_t2i=batch_size_t2i,
                     # batch_size_lm=batch_size_lm,
-                    # batch_size_mmu=batch_size_mmu,
+                    batch_size_mmu=batch_size_mmu,
                     max_seq_length=config.dataset.preprocessing.max_seq_length,
                 )
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss_t2i = accelerator.gather(loss_t2i.repeat(config.training.batch_size_t2i)).mean()
                 # avg_loss_lm = accelerator.gather(loss_lm.repeat(config.training.batch_size_lm)).mean()
-                # avg_loss_mmu = accelerator.gather(loss_mmu.repeat(config.training.batch_size_mmu)).mean()
+                avg_loss_mmu = accelerator.gather(loss_mmu.repeat(config.training.batch_size_mmu)).mean()
                 # loss = config.training.t2i_coeff * loss_t2i + \
                 #        config.training.lm_coeff * loss_lm + \
                 #        config.training.mmu_coeff * loss_mmu
 
-                loss = config.training.t2i_coeff * loss_t2i
+                loss = config.training.t2i_coeff * loss_t2i + \
+                       config.training.mmu_coeff * loss_mmu
 
                 avg_masking_rate = accelerator.gather(mask_prob.repeat(config.training.batch_size_t2i)).mean()
 
@@ -752,7 +830,7 @@ def main():
                     )
                     logs = {
                         "step_loss_t2i": avg_loss_t2i.item(),
-                        # "step_loss_mmu": avg_loss_mmu.item(),
+                        "step_loss_mmu": avg_loss_mmu.item(),
                         # "step_loss_lm": avg_loss_lm.item(),
                         "lr": lr_scheduler.get_last_lr()[0],
                         "avg_masking_rate": avg_masking_rate.item(),
@@ -764,8 +842,8 @@ def main():
 
                     logger.info(
                         f"Step: {global_step + 1} "
-                        f"Loss_t2i: {avg_loss_t2i.item():0.4f} "
-                        # f"Loss_mmu: {avg_loss_mmu.item():0.4f} "
+                        # f"Loss_t2i: {avg_loss_t2i.item():0.4f} "
+                        f"Loss_mmu: {avg_loss_mmu.item():0.4f} "
                         # f"Loss_lm: {avg_loss_lm.item():0.4f} "
                         f"Data (t): {data_time_m.val:0.4f}, {samples_per_second_per_gpu:0.2f}/s/gpu "
                         f"Batch (t): {batch_time_m.val:0.4f} "
@@ -778,10 +856,7 @@ def main():
 
                 # Save model checkpoint
                 if (global_step + 1) % config.experiment.save_every == 0:
-                    # save_checkpoint(model, config, accelerator, global_step + 1)
-                    save_checkpoint_1(model, config, accelerator, global_step + 1)
-                    # save_checkpoint_2(config, epoch, model, epoch, global_step + 1)
-
+                    save_checkpoint(model, config, accelerator, global_step + 1)
 
                 # if (global_step + 1) % config.experiment.generate_every == 0 and accelerator.is_main_process:
                 #     generate_images(
@@ -817,8 +892,7 @@ def main():
     accelerator.wait_for_everyone()
 
     # Evaluate and save checkpoint at the end of training
-    # save_checkpoint(model, config, accelerator, global_step)
-    save_checkpoint_1(model, config, accelerator, global_step)
+    save_checkpoint(model, config, accelerator, global_step)
 
     # Save the final trained checkpoint
     if accelerator.is_main_process:
@@ -1002,36 +1076,6 @@ def save_checkpoint(model, config, accelerator, global_step):
         )
         json.dump({"global_step": global_step}, (save_path / "metadata.json").open("w+"))
         logger.info(f"Saved state to {save_path}")
-
-
-def save_checkpoint_1(model, config, accelerator, global_step):
-    output_dir = config.experiment.output_dir
-    save_path = Path(output_dir) / f"checkpoint-{global_step}"
-    accelerator.save_state(save_path)
-
-
-# New Code #
-def save_checkpoint_2(config, ckpt_id, model, epoch, last_global_step, **kwargs):
-    """Utility function for checkpointing model + optimizer dictionaries
-    The main purpose for this is to be able to resume training from that instant again
-    """
-    output_dir = config.experiment.output_dir
-    save_path = Path(output_dir) / f"checkpoint-{last_global_step}"
-    checkpoint_folder = save_path
-    checkpoint_state_dict = {
-        "epoch": epoch,
-        "last_global_step": last_global_step,
-    }
-    # Add extra kwargs too
-    checkpoint_state_dict.update(kwargs)
-
-    success = model.save_checkpoint(checkpoint_folder, ckpt_id, checkpoint_state_dict)
-    status_msg = f"checkpointing: checkpoint_folder={checkpoint_folder}, ckpt_id={ckpt_id}"
-    if success:
-        logging.info(f"Success {status_msg}")
-    else:
-        logging.warning(f"Failure {status_msg}")
-    return
 
 
 def log_grad_norm(model, accelerator, global_step):

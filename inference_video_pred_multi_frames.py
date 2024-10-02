@@ -348,61 +348,63 @@ if __name__ == '__main__':
             image_tokens_past = vq_model.get_code(pixel_values_past) + len(uni_prompting.text_tokenizer)
             image_tokens_past = image_tokens_past.view(B, F_past, -1)
 
-            for cur_iter in range(num_iters):
+            # for cur_iter in range(num_iters):
 
-                image_tokens_future = torch.ones((B, F_future, config.model.showo.num_vq_tokens), 
-                                                dtype=torch.long, device=device) * mask_token_id
-                image_tokens = torch.cat((image_tokens_past, image_tokens_future), dim=1)
-                input_ids, _ = uni_prompting((image_tokens, []), 'video_pred_gen')
+            image_tokens_future = torch.ones((B, F_future, config.model.showo.num_vq_tokens), 
+                                            dtype=torch.long, device=device) * mask_token_id
+            image_tokens = torch.cat((image_tokens_past, image_tokens_future), dim=1)
+            input_ids, _ = uni_prompting((image_tokens, []), 'video_pred_gen')
 
-                if config.training.guidance_scale > 0:
-                    uncond_input_ids, _ = uni_prompting(([''] * len(prompts), image_tokens), 't2i_gen')
-                    attention_mask = create_attention_mask_predict_next(torch.cat([input_ids, uncond_input_ids], dim=0),
-                                                                        pad_id=int(uni_prompting.sptids_dict['<|pad|>']),
-                                                                        soi_id=int(uni_prompting.sptids_dict['<|soi|>']),
-                                                                        eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']),
-                                                                        rm_pad_in_image=True)
-                else:
-                    attention_mask = create_attention_mask_predict_next(input_ids,
-                                                                        pad_id=int(uni_prompting.sptids_dict['<|pad|>']),
-                                                                        soi_id=int(uni_prompting.sptids_dict['<|soi|>']),
-                                                                        eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']),
-                                                                        rm_pad_in_image=True)
-                    uncond_input_ids = None
+            if config.training.guidance_scale > 0:
+                uncond_input_ids, _ = uni_prompting(([''] * len(prompts), image_tokens), 't2i_gen')
+                attention_mask = create_attention_mask_predict_next(torch.cat([input_ids, uncond_input_ids], dim=0),
+                                                                    pad_id=int(uni_prompting.sptids_dict['<|pad|>']),
+                                                                    soi_id=int(uni_prompting.sptids_dict['<|soi|>']),
+                                                                    eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']),
+                                                                    rm_pad_in_image=True)
+            else:
+                attention_mask = create_attention_mask_predict_next(input_ids,
+                                                                    pad_id=int(uni_prompting.sptids_dict['<|pad|>']),
+                                                                    soi_id=int(uni_prompting.sptids_dict['<|soi|>']),
+                                                                    eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']),
+                                                                    rm_pad_in_image=True)
+                uncond_input_ids = None
 
-                if config.get("mask_schedule", None) is not None:
-                    schedule = config.mask_schedule.schedule
-                    args = config.mask_schedule.get("params", {})
-                    mask_schedule = get_mask_chedule(schedule, **args)
-                else:
-                    mask_schedule = get_mask_chedule(config.training.get("mask_schedule", "cosine"))
+            if config.get("mask_schedule", None) is not None:
+                schedule = config.mask_schedule.schedule
+                args = config.mask_schedule.get("params", {})
+                mask_schedule = get_mask_chedule(schedule, **args)
+            else:
+                mask_schedule = get_mask_chedule(config.training.get("mask_schedule", "cosine"))
 
-                with torch.no_grad():
-                    gen_token_ids = model.t2i_generate(
-                        input_ids=input_ids,
-                        uncond_input_ids=uncond_input_ids,
-                        attention_mask=attention_mask,
-                        guidance_scale=config.training.guidance_scale,
-                        temperature=config.training.get("generation_temperature", 1.0),
-                        timesteps=config.training.generation_timesteps,
-                        noise_schedule=mask_schedule,
-                        noise_type=config.training.get("noise_type", "mask"),
-                        seq_len=config.model.showo.num_vq_tokens,
-                        uni_prompting=uni_prompting,
-                        config=config,
-                    )
+            with torch.no_grad():
+                gen_token_ids = model.t2i_generate_multi_frames(
+                    input_ids=input_ids,
+                    uncond_input_ids=uncond_input_ids,
+                    attention_mask=attention_mask,
+                    guidance_scale=config.training.guidance_scale,
+                    temperature=config.training.get("generation_temperature", 1.0),
+                    timesteps=config.training.generation_timesteps,
+                    noise_schedule=mask_schedule,
+                    noise_type=config.training.get("noise_type", "mask"),
+                    seq_len=config.model.showo.num_vq_tokens,
+                    uni_prompting=uni_prompting,
+                    config=config,
+                    F_future=F_future,
 
-                gen_token_ids = torch.clamp(gen_token_ids, max=config.model.showo.codebook_size - 1, min=0)
-                # image_tokens_past = torch.cat((image_tokens_past[:, 1:, :], gen_token_ids[:, None, :]), dim=1)
-                # image_tokens_past = torch.cat((image_tokens_past, gen_token_ids[:, None, :]), dim=1)
+                )
 
-                hold_place_gen_token_ids = torch.ones((B, 1, config.model.showo.num_vq_tokens), 
-                                                       dtype=torch.long, device=device) * mask_token_id
-                image_tokens_past = torch.cat((image_tokens_past, hold_place_gen_token_ids), dim=1)
+            all_gen_token_ids = torch.clamp(gen_token_ids, max=config.model.showo.codebook_size - 1, min=0)
+            # image_tokens_past = torch.cat((image_tokens_past[:, 1:, :], gen_token_ids[:, None, :]), dim=1)
+            # image_tokens_past = torch.cat((image_tokens_past, gen_token_ids[:, None, :]), dim=1)
 
-                all_gen_token_ids_list.append(gen_token_ids[:, None, :])
+            # hold_place_gen_token_ids = torch.ones((B, 1, config.model.showo.num_vq_tokens), 
+            #                                         dtype=torch.long, device=device) * mask_token_id
+            # image_tokens_past = torch.cat((image_tokens_past, hold_place_gen_token_ids), dim=1)
 
-            all_gen_token_ids = torch.cat(all_gen_token_ids_list, dim=1)
+            # all_gen_token_ids_list.append(gen_token_ids[:, None, :])
+
+            # all_gen_token_ids = torch.cat(all_gen_token_ids_list, dim=1)
             num_pred_f = all_gen_token_ids.shape[1]
             all_gen_token_ids = all_gen_token_ids.view(B*num_pred_f, -1)
             images = vq_model.decode_code(all_gen_token_ids)
@@ -414,8 +416,8 @@ if __name__ == '__main__':
 
             pil_images[0].save('tmp_pred_0.jpg')
             pil_images[1].save('tmp_pred_1.jpg')
-            pil_images[2].save('tmp_pred_2.jpg')
-            pil_images[3].save('tmp_pred_3.jpg')
+            # pil_images[2].save('tmp_pred_2.jpg')
+            # pil_images[3].save('tmp_pred_3.jpg')
 
 
             image_tokens_gt = vq_model.get_code(pixel_values.view(-1, *pixel_values.shape[2:]))

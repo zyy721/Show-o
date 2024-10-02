@@ -9,8 +9,8 @@ experiment:
     # output_dir: "show-o-tuning-stage2-01"
     # name: "show-o-tuning-stage2-pred-2-frames"
     # output_dir: "show-o-tuning-stage2-pred-2-frames"    
-    name: "show-o-tuning-stage2-pred-indep-2-frames"
-    output_dir: "show-o-tuning-stage2-pred-indep-2-frames" 
+    name: "show-o-tuning-stage2-mix-modality"
+    output_dir: "show-o-tuning-stage2-mix-modality" 
     max_train_examples_t2i: 20000000
     max_train_examples_mmu: 40000000
     save_every: 10000
@@ -68,8 +68,8 @@ dataset:
         persistent_workers: True
 
     preprocessing:
-        # max_seq_length: 381 # for text tokens
-        max_seq_length: 2 # for text tokens
+        max_seq_length: 381 # for text tokens
+        # max_seq_length: 2 # for text tokens
         resolution: 256
         center_crop: False
         random_flip: False
@@ -100,7 +100,7 @@ training:
     batch_size_t2i: 1
 
     batch_size_lm: 2
-    batch_size_mmu: 6
+    batch_size_mmu: 1
     mixed_precision: "bf16"
     enable_tf32: True
     seed: 10086

@@ -141,7 +141,7 @@ def preprocess_v0(
 
 
 # class nuscenesDataset(DatasetFolder):
-class drivelmDataset(Dataset):
+class drivelmDatasetVal(Dataset):
 
     def __init__(
         self,
@@ -150,9 +150,9 @@ class drivelmDataset(Dataset):
         # loader: Callable[[str], Any] = default_loader,
         # is_valid_file: Optional[Callable[[str], bool]] = None,
         image_size=256,
-        training=True,
+        training=False,
     ):
-        super(drivelmDataset, self).__init__()
+        super(drivelmDatasetVal, self).__init__()
 
         self.tokenizer = tokenizer
 
@@ -183,6 +183,7 @@ class drivelmDataset(Dataset):
         self.questions = []
         self.images = []
         self.tmp_imglist = []
+        self.tasks = []
 
         # sample_rate = 2
 
@@ -260,21 +261,25 @@ class drivelmDataset(Dataset):
                 if "Perception" in value1:
                     Perception_q = value1['Perception']['q']
                     Perception_a = value1['Perception']['a']
+                    Perception_task = ['Perception'] * len(Perception_q)
                 else:
                     Perception_q = []
                     Perception_a = []
+                    Perception_task = []
 
                 if "Prediction and Planning" in value1:
                     Prediction_q = value1['Prediction and Planning']['q']
                     Prediction_a = value1['Prediction and Planning']['a']
+                    Prediction_task = ['Prediction and Planning'] * len(Prediction_q)
                 else:
                     Prediction_q = []
                     Prediction_a = []
+                    Prediction_task = []
                                     
 
                 Question = Perception_q + Prediction_q
                 Answer = Perception_a + Prediction_a
-
+                Name_task = Perception_task + Prediction_task
             
                 assert len(Question) == len(Answer)
 
@@ -284,6 +289,7 @@ class drivelmDataset(Dataset):
                     self.images.append(image_path)
                     cur_tmp_image = tmp_image + [image_path]
                     self.tmp_imglist.append(cur_tmp_image)
+                    self.tasks.append(Name_task[idx])
 
 
     def __len__(self) -> int:
@@ -298,21 +304,21 @@ class drivelmDataset(Dataset):
         cur_question = cur_question[3:]
         cur_answer = cur_answer[3:]
 
-        sources = {
-            "conversations": [
-                {
-                    "from": "human",
-                    "value": "<image>\n" + cur_question
-                },
-                {
-                    "from": "gpt",
-                    "value": cur_answer
-                },
-            ]
-        }
-        if isinstance(i, int):
-            sources = [sources]
-        assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
+        # sources = {
+        #     "conversations": [
+        #         {
+        #             "from": "human",
+        #             "value": "<image>\n" + cur_question
+        #         },
+        #         {
+        #             "from": "gpt",
+        #             "value": cur_answer
+        #         },
+        #     ]
+        # }
+        # if isinstance(i, int):
+        #     sources = [sources]
+        # assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
 
         cur_image_path = self.images[i]
         try:
@@ -323,14 +329,20 @@ class drivelmDataset(Dataset):
             crop_size = 256
             image = torch.zeros(3, crop_size, crop_size)
 
-        sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]))
+        # sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]))
 
-        data_dict = preprocess_v0(sources, self.tokenizer)
+        # data_dict = preprocess_v0(sources, self.tokenizer)
 
-        if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0],
-                             labels=data_dict["labels"][0],
-                             input_ids_system=data_dict["input_ids_system"][0])
+        # if isinstance(i, int):
+        #     data_dict = dict(input_ids=data_dict["input_ids"][0],
+        #                      labels=data_dict["labels"][0],
+        #                      input_ids_system=data_dict["input_ids_system"][0])
+
+        # TODO
+        input_ids = self.tokenizer(['USER: \n' + cur_question + ' ASSISTANT:'])[
+            'input_ids']
+        input_ids = torch.tensor(input_ids[0])
+        data_dict = dict(input_ids=input_ids)
 
         # image exist in the data
         # if 'image' in self.list_data_dict[i]:
@@ -341,48 +353,53 @@ class drivelmDataset(Dataset):
         #     data_dict['image'] = torch.zeros(3, crop_size, crop_size)
 
         data_dict['image'] = image
+        data_dict['question'] = cur_question
+        data_dict['answer'] = cur_answer
+        data_dict['task'] = self.tasks[i]
 
         return data_dict
 
 
 
-def collate_fn(
+def collate_fn_val(
         instances,
         tokenizer=None,
         max_length=77,
 ):
-    input_ids, labels, input_ids_system = tuple([instance[key] for instance in instances]
-                                                for key in ("input_ids", "labels", "input_ids_system"))
+    # input_ids, labels, input_ids_system = tuple([instance[key] for instance in instances]
+    #                                             for key in ("input_ids", "labels", "input_ids_system"))
+    input_ids = [instance['input_ids'] for instance in instances]
+
     input_ids = torch.nn.utils.rnn.pad_sequence(
         input_ids,
         batch_first=True,
         padding_value=tokenizer.pad_token_id)
-    labels = torch.nn.utils.rnn.pad_sequence(labels,
-                                             batch_first=True,
-                                             padding_value=IGNORE_INDEX)
-    input_ids_system = torch.stack(input_ids_system, dim=0)
+    # labels = torch.nn.utils.rnn.pad_sequence(labels,
+    #                                          batch_first=True,
+    #                                          padding_value=IGNORE_INDEX)
+    # input_ids_system = torch.stack(input_ids_system, dim=0)
 
-    offset = max_length - input_ids.shape[-1] - input_ids_system.shape[-1]
+    # offset = max_length - input_ids.shape[-1] - input_ids_system.shape[-1]
 
-    if input_ids.shape[-1] < max_length - input_ids_system.shape[-1]:
-        pad_tube = torch.ones(size=(input_ids.shape[0], offset), dtype=input_ids.dtype) * tokenizer.pad_token_id
-        input_ids = torch.cat([input_ids, pad_tube], dim=1)
+    # if input_ids.shape[-1] < max_length - input_ids_system.shape[-1]:
+    #     pad_tube = torch.ones(size=(input_ids.shape[0], offset), dtype=input_ids.dtype) * tokenizer.pad_token_id
+    #     input_ids = torch.cat([input_ids, pad_tube], dim=1)
 
-        pad_tube = torch.ones(size=(labels.shape[0], offset), dtype=labels.dtype) * IGNORE_INDEX
-        labels = torch.cat([labels, pad_tube], dim=1)
+    #     pad_tube = torch.ones(size=(labels.shape[0], offset), dtype=labels.dtype) * IGNORE_INDEX
+    #     labels = torch.cat([labels, pad_tube], dim=1)
 
-    min_max_len = min(
-        max_length - input_ids_system.shape[-1],
-        tokenizer.model_max_length - input_ids_system.shape[-1],
-    )
+    # min_max_len = min(
+    #     max_length - input_ids_system.shape[-1],
+    #     tokenizer.model_max_length - input_ids_system.shape[-1],
+    # )
 
-    input_ids = input_ids[:, :min_max_len]
-    labels = labels[:, :min_max_len]
+    # input_ids = input_ids[:, :min_max_len]
+    # labels = labels[:, :min_max_len]
     batch = dict(
         input_ids=input_ids,
-        labels=labels,
+        # labels=labels,
         attention_mask=input_ids.ne(tokenizer.pad_token_id),
-        input_ids_system=input_ids_system,
+        # input_ids_system=input_ids_system,
     )
 
     if 'image' in instances[0]:
@@ -392,10 +409,14 @@ def collate_fn(
         else:
             batch['images'] = images
 
+    batch['question'] = [instance['question'] for instance in instances]
+    batch['answer'] = [instance['answer'] for instance in instances]
+    batch['task'] = [instance['task'] for instance in instances]
+
     return batch
 
 
-def get_drivelm_data_loader(
+def get_drivelm_data_loader_val(
         tokenizer,
         batch_size,
         num_workers,
@@ -403,9 +424,9 @@ def get_drivelm_data_loader(
         local_rank,
         max_length,
         phase,
-        training=True,
+        training=False,
 ):
-    train_dataset = drivelmDataset(
+    train_dataset = drivelmDatasetVal(
         tokenizer,
         # phase,
         training,
@@ -419,7 +440,7 @@ def get_drivelm_data_loader(
         num_workers=num_workers,
         pin_memory=True,
         collate_fn=partial(
-            collate_fn,
+            collate_fn_val,
             tokenizer=tokenizer,
             max_length=max_length,
         ),

@@ -89,6 +89,79 @@ class UniversalPrompting():
 
         return torch.cat(sequence_ids, dim=0), torch.cat(attention_masks, dim=0), torch.cat(label_ids, dim=0)
 
+    # def video_pred_prompt(self, text_ids, image_ids, labels, image_ids_past):
+
+    #     labels_past = torch.zeros_like(image_ids_past, dtype=torch.long) - 100
+    #     labels = torch.cat((labels_past, labels), dim=1)
+    #     image_ids = torch.cat((image_ids_past, image_ids), dim=1)
+    #     F = labels.shape[1]
+
+    #     device = image_ids.device
+    #     sequence_ids = []
+    #     attention_masks = []
+    #     label_ids = []
+    #     # probs = torch.rand(len(text_ids))
+    #     for i in range(len(text_ids)):
+
+    #         if len(text_ids[i]) == 0:
+    #             text_ids[i] = [self.text_tokenizer.bos_token_id]
+    #         elif text_ids[i][0] != self.text_tokenizer.bos_token_id:
+    #             text_ids[i] = [self.text_tokenizer.bos_token_id] + text_ids[i]
+
+    #         # temp_ids = [int(self.sptids_dict['<|t2i|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
+    #         temp_ids = [int(self.sptids_dict['<|v2v|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
+
+    #         # randomly dropout text condition
+    #         # if probs[i] < self.cond_dropout_prob:
+    #         #     temp_ids = [int(self.sptids_dict['<|t2i|>']), self.text_tokenizer.bos_token_id, self.text_tokenizer.eos_token_id]
+
+    #         if self.max_text_len >= len(temp_ids):
+    #             temp_ids = [self.pad_id] * (self.max_text_len - len(temp_ids)) + temp_ids
+    #             # temp_masks = [0] * (self.max_text_len - len(temp_ids)) + [1] * (len(temp_ids) + image_ids.shape[-1] + 3)
+    #         else:
+    #             # should add the eos token
+    #             temp_ids = temp_ids[:self.max_text_len - 1] + [self.text_tokenizer.eos_token_id]
+    #             # temp_masks = [1] * (len(temp_ids) + image_ids.shape[-1] + 3)  # +2 for two special tokens
+
+    #         # prompting -- [task token] [sot] [text tokens] [eot] [soi] [image tokens] [eoi]
+    #         # temp_label_ids = torch.cat([
+    #         #     # should we predict text tokens when doing image reconstruction?
+    #         #     torch.tensor(temp_ids).to(device),
+    #         #     self.sptids_dict['<|soi|>'].to(device),
+    #         #     labels[i],
+    #         #     self.sptids_dict['<|eoi|>'].to(device)
+    #         # ], dim=0)
+
+    #         temp_label_ids_list = [torch.tensor(temp_ids).to(device)]
+    #         for cur_frame in range(F):
+    #             temp_label_ids_list.append(self.sptids_dict['<|soi|>'].to(device))
+    #             temp_label_ids_list.append(labels[i, cur_frame])
+    #             temp_label_ids_list.append(self.sptids_dict['<|eoi|>'].to(device))
+    #         temp_label_ids = torch.cat(temp_label_ids_list, dim=0)
+    #         temp_label_ids = torch.where(temp_label_ids == self.pad_id, self.ignore_id, temp_label_ids)
+
+    #         # temp_ids = torch.cat([
+    #         #     torch.tensor(temp_ids).to(device),
+    #         #     self.sptids_dict['<|soi|>'].to(device),
+    #         #     image_ids[i],
+    #         #     self.sptids_dict['<|eoi|>'].to(device)
+    #         # ], dim=0)
+
+    #         temp_ids_list = [torch.tensor(temp_ids).to(device)]
+    #         for cur_frame in range(F):
+    #             temp_ids_list.append(self.sptids_dict['<|soi|>'].to(device))
+    #             temp_ids_list.append(image_ids[i, cur_frame])
+    #             temp_ids_list.append(self.sptids_dict['<|eoi|>'].to(device))
+    #         temp_ids = torch.cat(temp_ids_list, dim=0)
+
+    #         # temp_masks = torch.tensor(temp_masks).to(device)
+    #         sequence_ids.append(temp_ids.unsqueeze(0))
+    #         # attention_masks.append(temp_masks.unsqueeze(0))
+    #         label_ids.append(temp_label_ids.unsqueeze(0))
+
+    #     # return torch.cat(sequence_ids, dim=0), torch.cat(attention_masks, dim=0), torch.cat(label_ids, dim=0)
+    #     return torch.cat(sequence_ids, dim=0), attention_masks, torch.cat(label_ids, dim=0)
+
     def video_pred_prompt(self, text_ids, image_ids, labels, image_ids_past):
 
         labels_past = torch.zeros_like(image_ids_past, dtype=torch.long) - 100
@@ -100,43 +173,61 @@ class UniversalPrompting():
         sequence_ids = []
         attention_masks = []
         label_ids = []
+
+        text_frame_id = self.text_tokenizer(['0', '1', '2', '3', '4', '5'])['input_ids']
+        text_frame_id = torch.tensor(text_frame_id).to(device)
+        
         # probs = torch.rand(len(text_ids))
         for i in range(len(text_ids)):
 
-            if len(text_ids[i]) == 0:
-                text_ids[i] = [self.text_tokenizer.bos_token_id]
-            elif text_ids[i][0] != self.text_tokenizer.bos_token_id:
-                text_ids[i] = [self.text_tokenizer.bos_token_id] + text_ids[i]
+            # if len(text_ids[i]) == 0:
+            #     text_ids[i] = [self.text_tokenizer.bos_token_id]
+            # elif text_ids[i][0] != self.text_tokenizer.bos_token_id:
+            #     text_ids[i] = [self.text_tokenizer.bos_token_id] + text_ids[i]
 
-            # temp_ids = [int(self.sptids_dict['<|t2i|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
-            temp_ids = [int(self.sptids_dict['<|v2v|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
+            # # temp_ids = [int(self.sptids_dict['<|t2i|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
+            # temp_ids = [int(self.sptids_dict['<|v2v|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
 
-            # randomly dropout text condition
-            # if probs[i] < self.cond_dropout_prob:
-            #     temp_ids = [int(self.sptids_dict['<|t2i|>']), self.text_tokenizer.bos_token_id, self.text_tokenizer.eos_token_id]
+            # # randomly dropout text condition
+            # # if probs[i] < self.cond_dropout_prob:
+            # #     temp_ids = [int(self.sptids_dict['<|t2i|>']), self.text_tokenizer.bos_token_id, self.text_tokenizer.eos_token_id]
 
-            if self.max_text_len >= len(temp_ids):
-                temp_ids = [self.pad_id] * (self.max_text_len - len(temp_ids)) + temp_ids
-                # temp_masks = [0] * (self.max_text_len - len(temp_ids)) + [1] * (len(temp_ids) + image_ids.shape[-1] + 3)
-            else:
-                # should add the eos token
-                temp_ids = temp_ids[:self.max_text_len - 1] + [self.text_tokenizer.eos_token_id]
-                # temp_masks = [1] * (len(temp_ids) + image_ids.shape[-1] + 3)  # +2 for two special tokens
+            # if self.max_text_len >= len(temp_ids):
+            #     temp_ids = [self.pad_id] * (self.max_text_len - len(temp_ids)) + temp_ids
+            #     # temp_masks = [0] * (self.max_text_len - len(temp_ids)) + [1] * (len(temp_ids) + image_ids.shape[-1] + 3)
+            # else:
+            #     # should add the eos token
+            #     temp_ids = temp_ids[:self.max_text_len - 1] + [self.text_tokenizer.eos_token_id]
+            #     # temp_masks = [1] * (len(temp_ids) + image_ids.shape[-1] + 3)  # +2 for two special tokens
 
-            # prompting -- [task token] [sot] [text tokens] [eot] [soi] [image tokens] [eoi]
-            # temp_label_ids = torch.cat([
-            #     # should we predict text tokens when doing image reconstruction?
-            #     torch.tensor(temp_ids).to(device),
-            #     self.sptids_dict['<|soi|>'].to(device),
-            #     labels[i],
-            #     self.sptids_dict['<|eoi|>'].to(device)
-            # ], dim=0)
+            # # prompting -- [task token] [sot] [text tokens] [eot] [soi] [image tokens] [eoi]
+            # # temp_label_ids = torch.cat([
+            # #     # should we predict text tokens when doing image reconstruction?
+            # #     torch.tensor(temp_ids).to(device),
+            # #     self.sptids_dict['<|soi|>'].to(device),
+            # #     labels[i],
+            # #     self.sptids_dict['<|eoi|>'].to(device)
+            # # ], dim=0)
 
-            temp_label_ids_list = [torch.tensor(temp_ids).to(device)]
+
+            temp_ids_pad_text_list = []
+            temp_ids_pad_text_list.append(torch.tensor(self.sptids_dict['<|sot|>']))
+            temp_ids_pad_text_list.append(torch.tensor(self.sptids_dict['<|eot|>']))
+            temp_ids_pad_text_list.append(self.sptids_dict['<|pad|>'] * torch.ones(self.max_text_len - 3, dtype=torch.long))
+            temp_ids_pad_text = torch.cat(temp_ids_pad_text_list)
+
+            temp_label_ids_pad_text = self.ignore_id * torch.ones(len(temp_ids_pad_text), dtype=torch.long)
+
+            temp_label_ids_list = []
+            temp_label_ids_list.append(torch.tensor([self.ignore_id]).to(device))
             for cur_frame in range(F):
+                # temp_label_ids_list.append(ignore_id)
+                # temp_label_ids_list.append(ignore_id)
+                # temp_label_ids_list.append(ignore_id)
                 temp_label_ids_list.append(self.sptids_dict['<|soi|>'].to(device))
                 temp_label_ids_list.append(labels[i, cur_frame])
                 temp_label_ids_list.append(self.sptids_dict['<|eoi|>'].to(device))
+            temp_label_ids_list.append(temp_label_ids_pad_text.to(device))
             temp_label_ids = torch.cat(temp_label_ids_list, dim=0)
             temp_label_ids = torch.where(temp_label_ids == self.pad_id, self.ignore_id, temp_label_ids)
 
@@ -147,11 +238,16 @@ class UniversalPrompting():
             #     self.sptids_dict['<|eoi|>'].to(device)
             # ], dim=0)
 
-            temp_ids_list = [torch.tensor(temp_ids).to(device)]
+            temp_ids_list = []
+            temp_ids_list.append(self.sptids_dict['<|v2v|>'].to(device))
             for cur_frame in range(F):
+                # temp_ids_list.append(self.sptids_dict['<|sot|>'].to(device))
+                # temp_ids_list.append(text_frame_id[cur_frame])
+                # temp_ids_list.append(self.sptids_dict['<|eot|>'].to(device))
                 temp_ids_list.append(self.sptids_dict['<|soi|>'].to(device))
                 temp_ids_list.append(image_ids[i, cur_frame])
                 temp_ids_list.append(self.sptids_dict['<|eoi|>'].to(device))
+            temp_ids_list.append(temp_ids_pad_text.to(device))
             temp_ids = torch.cat(temp_ids_list, dim=0)
 
             # temp_masks = torch.tensor(temp_masks).to(device)
@@ -446,6 +542,7 @@ class UniversalPrompting():
             text_ids = [[] for i in range(len(input[1]))]
             image_ids = input[1]  # (B, #tokens)
             sequence_ids_with_masks = self.video_pred_prompt(text_ids, image_ids, input[2], input[3])
+            # sequence_ids_with_masks = self.video_pred_prompt_indep_multi_frames(text_ids, image_ids, input[2], input[3])
 
 
         elif task == "t2i_plus_lm":

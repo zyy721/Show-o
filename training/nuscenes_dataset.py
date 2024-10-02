@@ -73,7 +73,8 @@ class nuscenesDataset:
 
         self.scene_lens = [len(self.nusc_infos[sn]) for sn in self.scene_names]
         # self.return_len = 6
-        self.return_len = 3
+        # self.return_len = 3
+        self.return_len = 4
 
         self.offset = 0        
         self.times = 20
@@ -125,6 +126,9 @@ class nuscenesDataset:
         return len(self.scene_videos)
 
     def __getitem__(self, idx):
+
+        # idx = 3900
+        # idx = 4500
 
         try:
             # path, target = self.samples[idx]
@@ -220,7 +224,8 @@ class nuscenesDatasetVal:
 
         self.scene_lens = [len(self.nusc_infos[sn]) for sn in self.scene_names]
         # self.return_len = 6
-        self.return_len = 3
+        # self.return_len = 3
+        self.return_len = 4
 
         self.offset = 0        
         self.times = 20
@@ -272,6 +277,8 @@ class nuscenesDatasetVal:
         return len(self.scene_videos)
 
     def __getitem__(self, idx):
+
+        # idx = 1000
 
         try:
             # path, target = self.samples[idx]

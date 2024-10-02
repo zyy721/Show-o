@@ -27,6 +27,7 @@ from transformers import AutoTokenizer
 from transformers import CLIPImageProcessor
 
 from llava.llava import conversation as conversation_lib
+from tqdm import tqdm
 
 conversation_lib.default_conversation = conversation_lib.conv_templates["phi1.5"]
 SYSTEM_PROMPT = "A chat between a curious user and an artificial intelligence assistant. " \
@@ -35,6 +36,7 @@ SYSTEM_PROMPT_LEN = 28
 
 
 from training.drivelm_dataset import get_drivelm_data_loader, drivelmDataset
+from training.drivelm_dataset_val import get_drivelm_data_loader_val, drivelmDatasetVal
 import json
 from tqdm import tqdm
 
@@ -196,45 +198,29 @@ if __name__ == '__main__':
     #         responses[i] += f'User: ' + question + f'\n Answer : ' + text[0] + '\n'
 
 
-    val_dataset = drivelmDataset(
-        tokenizer,
-        # phase,
-        training=False,
-    )
-
-    # batch_size = 1
-
-    # train_dataloader_mmu, len_dataset_drivelm = get_drivelm_data_loader(
-    #     tokenizer,
-    #     batch_size=batch_size,
-    #     num_workers=4
-    #     world_size=1,
-    #     local_rank=0,
-    #     max_length=2048,
-    #     phase="tuning",
-    #     trainin=False,
-    # )
-
-    # for batch in train_dataloader_mmu:
-    #     pixel_values, input_ids, labels = (batch["images"],
-    #                                        batch["input_ids"],
-    #                                        batch["labels"])
-
+    batch_size = 4
     # all_questions, all_pred_answers, all_gt_answers = [], [], []
     vqa_result = []
 
-    for image_path, question, answer in tqdm(zip(val_dataset.images, val_dataset.questions, val_dataset.answers)):
-        question = question[3:]
-        answer = answer[0][3:]
+    train_dataloader_mmu, len_dataset_drivelm = get_drivelm_data_loader_val(
+            tokenizer,
+            batch_size=batch_size,
+            num_workers=4,
+            world_size=1,
+            local_rank=0,
+            max_length=2048,
+            phase="tuning",
+            training=False,
+    )
 
-        image_ori = Image.open(image_path).convert("RGB")
-        image = image_transform(image_ori, resolution=config.dataset.params.resolution).to(device)
-        image = image.unsqueeze(0)
-        image_tokens = vq_model.get_code(image) + len(uni_prompting.text_tokenizer)
+    for batch in tqdm(train_dataloader_mmu):
+        pixel_values, input_ids = (batch["images"],
+                                   batch["input_ids"])
+        pixel_values = pixel_values.to(device)
+        input_ids = input_ids.to(device)
+        image_tokens = vq_model.get_code(pixel_values)
+        image_tokens = image_tokens + len(uni_prompting.text_tokenizer)
 
-        input_ids = uni_prompting.text_tokenizer(['USER: \n' + question + ' ASSISTANT:'])[
-            'input_ids']
-        input_ids = torch.tensor(input_ids).to(device)
 
         input_ids = torch.cat([
             (torch.ones(input_ids.shape[0], 1) * uni_prompting.sptids_dict['<|mmu|>']).to(device),
@@ -248,22 +234,29 @@ if __name__ == '__main__':
         attention_mask = create_attention_mask_for_mmu(input_ids.to(device),
                                                         eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']))
 
-        cont_toks_list = model.mmu_generate(input_ids, attention_mask=attention_mask,
-                                    max_new_tokens=100, top_k=top_k,
-                                    eot_token=uni_prompting.sptids_dict['<|eot|>'])
+        # cont_toks_list = model.mmu_generate(input_ids, attention_mask=attention_mask,
+        #                             max_new_tokens=100, top_k=top_k,
+        #                             eot_token=uni_prompting.sptids_dict['<|eot|>'])
 
-        cont_toks_list = torch.stack(cont_toks_list).squeeze()[None]
+        cont_toks_list = model.batch_mmu_generate(input_ids, attention_mask=attention_mask,
+                                    max_new_tokens=100, top_k=top_k,
+                                    eot_token=uni_prompting.sptids_dict['<|eot|>'], pad_token=uni_prompting.pad_id)
+
+        # cont_toks_list = torch.stack(cont_toks_list).squeeze()[None]
+        cont_toks_list = torch.stack(cont_toks_list).transpose(0, 1)
 
         text = uni_prompting.text_tokenizer.batch_decode(cont_toks_list, skip_special_tokens=True)
         # all_questions.append(question)
         # all_pred_answers.append(text[0])
         # all_gt_answers.append(answer)
 
-        cur_vqa_result = {}
-        cur_vqa_result['question'] = question
-        cur_vqa_result['answer'] = text[0]
-        cur_vqa_result['gt_answer'] = answer
-        vqa_result.append(cur_vqa_result)
+        for idx_batch in range(len(text)):
+            cur_vqa_result = {}
+            cur_vqa_result['task'] = batch['task'][idx_batch]
+            cur_vqa_result['question'] = batch['question'][idx_batch]
+            cur_vqa_result['answer'] = text[idx_batch]
+            cur_vqa_result['gt_answer'] = batch['answer'][idx_batch]
+            vqa_result.append(cur_vqa_result)
 
         # print(text)
         # responses[i] += f'User: ' + question + f'\n Answer : ' + text[0] + '\n'
@@ -273,7 +266,7 @@ if __name__ == '__main__':
     with open(val_vqa_itr_result_json, 'w') as f:
         json.dump(vqa_result, f, indent=4)
 
-        
+
     # images = torch.cat(images, dim=0)
     # images = torch.clamp((images + 1.0) / 2.0, min=0.0, max=1.0)
     # images *= 255.0
