@@ -66,7 +66,7 @@ class Showo(ModelMixin, ConfigMixin):
 
     def forward(
             self,
-            input_ids,
+            input_ids=None,
 
             # gt_ego_pose,
 

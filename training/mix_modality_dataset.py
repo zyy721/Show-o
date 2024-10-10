@@ -408,21 +408,21 @@ class MixModalityDataset(Dataset):
                 
 
                 cur_image_copy = cur_image.copy()
+                resolution = 256
+                from torchvision import transforms
+                cur_image_copy = transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BICUBIC)(cur_image_copy)
+                cur_image_copy = transforms.CenterCrop((resolution, resolution))(cur_image_copy)
                 if cur_timestamp == 1:
-                    def convert_width_height(match):
+                    def convert_string(input_string):
+                        pattern = r"<([^>]+),(\d+\.\d+),(\d+\.\d+)>"
+                        match = re.search(pattern, input_string)
                         string_value, float_value1, float_value2 = match.group(1, 2, 3)
                         float_value1 = float(float_value1)
                         float_value2 = float(float_value2)
                         return float_value1, float_value2
 
-
-                    def convert_string(input_string):
-                        pattern = r"<([^>]+),(\d+\.\d+),(\d+\.\d+)>"
-                        output_string = re.findall(pattern, convert_width_height, input_string)
-                        return output_string
-
                     x_range_0_1, y_range_0_1 = convert_string(cur_question)
-                    point_coordinates = (int(1600*x_range_0_1), int(1600*y_range_0_1))  # x, y coordinates
+                    point_coordinates = (int(cur_image_copy.size[0]*x_range_0_1), int(cur_image_copy.size[1]*y_range_0_1))  # x, y coordinates
                     draw = ImageDraw.Draw(cur_image_copy)
                     point_color = (255, 0, 0)  # Red color
                     point_size = 5  # Size of the point
@@ -433,6 +433,7 @@ class MixModalityDataset(Dataset):
 
 
                 cur_image = image_transform(cur_image)
+
                 bool_pad_image_list.append(False)
             image_list.append(cur_image)
         image = torch.stack(image_list, dim=0)
@@ -653,6 +654,7 @@ class DriveLMMixModalityDataset(Dataset):
         self,
         tokenizer,
         image_size=256,
+        w_clip=False
     ):
         super(DriveLMMixModalityDataset, self).__init__()
 
@@ -667,14 +669,18 @@ class DriveLMMixModalityDataset(Dataset):
 
         vision_tower_name = "openai/clip-vit-large-patch14-336"
         self.clip_image_processor = CLIPImageProcessor.from_pretrained(vision_tower_name)
+        self.w_clip = w_clip
 
         self.default_drivelm()
 
 
     def default_drivelm(self):
-        self.temporal_length = 6
-        past_length = 3
-        future_length = 3
+        # self.temporal_length = 6
+        # past_length = 3
+        # future_length = 3
+        self.temporal_length = 4
+        past_length = 2
+        future_length = 2
         sample_rate = 2
 
         # self.annotation = json.load(open('data/drivelm_train.json', "r"))
@@ -809,29 +815,39 @@ class DriveLMMixModalityDataset(Dataset):
         image_list = []
         bool_pad_image_list = []
         for cur_image_path in path_list:
-            if cur_image_path == 'pad':
-                crop_size = 256
-                cur_image = torch.zeros(3, crop_size, crop_size)
-                bool_pad_image_list.append(True)
+            if self.w_clip:
+                if cur_image_path == 'pad':
+                    crop_size = 336
+                    cur_image = torch.zeros(3, crop_size, crop_size)
+                    bool_pad_image_list.append(True)
+                else:
+                    cur_image = Image.open(cur_image_path).convert('RGB')
+                    cur_image = self.clip_image_processor.preprocess(cur_image, return_tensors='pt')['pixel_values'][0]
+                    bool_pad_image_list.append(False)
             else:
-                cur_image = Image.open(cur_image_path).convert('RGB')
+                if cur_image_path == 'pad':
+                    crop_size = 256
+                    cur_image = torch.zeros(3, crop_size, crop_size)
+                    bool_pad_image_list.append(True)
+                else:
+                    cur_image = Image.open(cur_image_path).convert('RGB')
 
-                def expand2square(pil_img, background_color):
-                    width, height = pil_img.size
-                    if width == height:
-                        return pil_img
-                    elif width > height:
-                        result = Image.new(pil_img.mode, (width, width), background_color)
-                        result.paste(pil_img, (0, (width - height) // 2))
-                        return result
-                    else:
-                        result = Image.new(pil_img.mode, (height, height), background_color)
-                        result.paste(pil_img, ((height - width) // 2, 0))
-                        return result
-                cur_image = expand2square(cur_image, tuple(int(x*255) for x in self.clip_image_processor.image_mean))
+                    def expand2square(pil_img, background_color):
+                        width, height = pil_img.size
+                        if width == height:
+                            return pil_img
+                        elif width > height:
+                            result = Image.new(pil_img.mode, (width, width), background_color)
+                            result.paste(pil_img, (0, (width - height) // 2))
+                            return result
+                        else:
+                            result = Image.new(pil_img.mode, (height, height), background_color)
+                            result.paste(pil_img, ((height - width) // 2, 0))
+                            return result
+                    cur_image = expand2square(cur_image, tuple(int(x*255) for x in self.clip_image_processor.image_mean))
 
-                cur_image = image_transform(cur_image, save=True)
-                bool_pad_image_list.append(False)
+                    cur_image = image_transform(cur_image, save=True)
+                    bool_pad_image_list.append(False)
             image_list.append(cur_image)
         image = torch.stack(image_list, dim=0)
         bool_pad_image = torch.tensor(bool_pad_image_list)
@@ -921,6 +937,7 @@ def get_drivelm_mix_modality_data_loader(
         local_rank,
         max_length,
         phase,
+        w_clip=False,
 ):
     # train_dataset = MixModalityDataset(
     #     tokenizer,
@@ -929,6 +946,7 @@ def get_drivelm_mix_modality_data_loader(
     train_dataset = DriveLMMixModalityDataset(
         tokenizer,
         # phase,
+        w_clip=w_clip,
     )
     datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank)
     dataloader = torch.utils.data.DataLoader(
