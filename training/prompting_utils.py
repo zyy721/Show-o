@@ -748,7 +748,7 @@ def create_attention_mask_for_mmu_vit(
     N, L, H = sequence.shape
     causal_mask = torch.tril(torch.ones((N, 1, L, L), dtype=torch.bool)).to(sequence.device)
     if F_mmu is not None:
-        index = 1 + system_prompt_len + (1 + 576 + 1) * F_mmu
+        index = 1 + system_prompt_len + (2 + 1 + 576 + 1 + 2) * F_mmu
     else:
         index = 1 + system_prompt_len + 1 + 576
     # TODO: PART OF SYSTEM PROMPT SHOULD BE CAUSAL ALSO

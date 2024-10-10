@@ -566,7 +566,6 @@ def main():
                 input_ids_system = input_ids_system.to(accelerator.device, non_blocking=True)
                 bool_pad_image_mmu = bool_pad_image_mmu.to(accelerator.device, non_blocking=True)
 
-
                 input_ids_mmu = torch.cat([
                     (torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.sptids_dict['<|mmu|>']).to(accelerator.device),
                     input_ids_system,
@@ -577,27 +576,42 @@ def main():
                 ], dim=1).long()
 
                 B_mmu, F_mmu = pixel_values_mmu.shape[:2]
+
+                frame_name_list, frame_ids_list = [], []
+                for cur_frame in range(F_mmu):
+                    cur_frame_name = "frame {}".format(cur_frame)
+                    cur_frame_ids = tokenizer(cur_frame_name)['input_ids']
+                    frame_name_list.append(cur_frame_name)
+                    frame_ids_list.append(cur_frame_ids)
+                frame_ids = torch.tensor(frame_ids_list).to(accelerator.device, non_blocking=True)
+
                 valid_pixel_values_mmu = pixel_values_mmu[~bool_pad_image_mmu]
                 valid_images_feat = vision_tower(valid_pixel_values_mmu)
                 if hasattr(model, 'module'):
                     valid_images_embeddings = model.module.mm_projector(valid_images_feat)
                     text_embeddings = model.module.showo.model.embed_tokens(input_ids_mmu)
+                    frame_ids_embeddings = model.module.showo.model.embed_tokens(frame_ids)
                 else:
                     valid_images_embeddings = model.mm_projector(valid_images_feat)
                     text_embeddings = model.showo.model.embed_tokens(input_ids_mmu)
+                    frame_ids_embeddings = model.showo.model.embed_tokens(frame_ids)
                 # part1 = text_embeddings[:, :2 + SYSTEM_PROMPT_LEN, :]
                 # part2 = text_embeddings[:, 2 + SYSTEM_PROMPT_LEN:, :]
 
                 images_embeddings = torch.zeros((B_mmu, F_mmu, *valid_images_embeddings.shape[1:]), device=valid_images_embeddings.device, dtype=valid_images_embeddings.dtype)
                 images_embeddings[~bool_pad_image_mmu] = valid_images_embeddings
                 # input_embeddings = torch.cat((part1, images_embeddings, part2), dim=1)
+                frame_ids_embeddings = frame_ids_embeddings.unsqueeze(0).expand([B_mmu, -1, -1, -1])
+
 
                 temp_embeddings_list = []
                 temp_embeddings_list.append(text_embeddings[:, :1 + SYSTEM_PROMPT_LEN, :])
                 for cur_frame in range(F_mmu):
+                    temp_embeddings_list.append(frame_ids_embeddings[:, cur_frame])
                     temp_embeddings_list.append(text_embeddings[:, 1 + SYSTEM_PROMPT_LEN:2 + SYSTEM_PROMPT_LEN, :])
                     temp_embeddings_list.append(images_embeddings[:, cur_frame])
                     temp_embeddings_list.append(text_embeddings[:, 2 + SYSTEM_PROMPT_LEN:3 + SYSTEM_PROMPT_LEN, :])
+                    temp_embeddings_list.append(frame_ids_embeddings[:, cur_frame])
                 temp_embeddings_list.append(text_embeddings[:, 3 + SYSTEM_PROMPT_LEN:, :])
                 input_embeddings = torch.cat(temp_embeddings_list, dim=1)
 
@@ -605,9 +619,11 @@ def main():
                 temp_labels_list.append((torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device))  # mmu
                 temp_labels_list.append(torch.ones_like(input_ids_system) * uni_prompting.ignore_id)  # ignore system prompt
                 for cur_frame in range(F_mmu):
+                    temp_labels_list.append(torch.ones_like(frame_ids_embeddings[:, cur_frame, :, 0]) * uni_prompting.ignore_id)  # ignore image embedding
                     temp_labels_list.append((torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device))  # soi
                     temp_labels_list.append(torch.ones_like(images_embeddings[:, cur_frame, :, 0]) * uni_prompting.ignore_id)  # ignore image embedding
                     temp_labels_list.append((torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device))  # eoi
+                    temp_labels_list.append(torch.ones_like(frame_ids_embeddings[:, cur_frame, :, 0]) * uni_prompting.ignore_id)  # ignore image embedding                
                 temp_labels_list.append(labels_mmu.to(accelerator.device))
                 labels_mmu = torch.cat(temp_labels_list, dim=1).long()
 

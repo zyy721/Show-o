@@ -679,7 +679,7 @@ class DriveLMMixModalityDataset(Dataset):
         # past_length = 3
         # future_length = 3
         self.temporal_length = 4
-        past_length = 2
+        self.past_length = 2
         future_length = 2
         sample_rate = 2
 
@@ -693,7 +693,7 @@ class DriveLMMixModalityDataset(Dataset):
             image_path = info['cams']["CAM_FRONT"]['data_path']
             # temporal data only for image path
             past_tmp_image = []
-            for tmp in range(0, past_length*sample_rate, sample_rate):
+            for tmp in range(0, self.past_length*sample_rate, sample_rate):
                 if scene_token != self.data_info[idx-tmp]['scene_token']:
                     continue
                 tmp_path = self.data_info[idx-tmp]['cams']['CAM_FRONT']['data_path']
@@ -701,9 +701,9 @@ class DriveLMMixModalityDataset(Dataset):
 
             # if the image path is not equal self.temporal length, then use the duplicate image path
             past_tmp_image = past_tmp_image[::-1]
-            if len(past_tmp_image) != past_length:
-                past_tmp_image = ['pad'] * (past_length - len(past_tmp_image)) + past_tmp_image
-            assert len(past_tmp_image) == past_length
+            if len(past_tmp_image) != self.past_length:
+                past_tmp_image = ['pad'] * (self.past_length - len(past_tmp_image)) + past_tmp_image
+            assert len(past_tmp_image) == self.past_length
 
             # temporal data only for image path
             future_tmp_image = []
@@ -789,7 +789,7 @@ class DriveLMMixModalityDataset(Dataset):
             "conversations": [
                 {
                     "from": "human",
-                    "value": "<image>\n" + cur_question
+                    "value": "<image>\nGiven <frame {}> as the current frame. ".format(self.past_length-1) + cur_question
                 },
                 {
                     "from": "gpt",
