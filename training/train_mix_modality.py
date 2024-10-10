@@ -59,7 +59,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from llava.llava_data_vq_unified import get_instruct_data_loader
 from training.drivelm_dataset import get_drivelm_data_loader
-from training.mix_modality_dataset import get_drivelm_mix_modality_data_loader, get_mix_modality_data_loader
+from training.mix_modality_dataset import get_drivelm_mix_modality_data_loader
 
 SYSTEM_PROMPT_LEN = 28
 
@@ -761,13 +761,10 @@ def main():
 
             attention_mask_mmu = create_attention_mask_for_mmu(input_ids_mmu.to(input_ids.device),
                                                                eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']))
+            attention_mask_mmu = attention_mask_mmu.to(mask_dtype)
             attention_mask = torch.cat([attention_mask, attention_mask_mmu], dim=0)
             input_ids = torch.cat((input_ids, input_ids_mmu.to(input_ids.device)), dim=0)
             labels = torch.cat((labels, labels_mmu.to(input_ids.device)), dim=0)
-
-            attention_mask = attention_mask_mmu
-            input_ids = input_ids_mmu 
-            labels = labels_mmu
 
             if global_step == 0 and epoch == 0:
                 logger.info("Input ids: {}".format(input_ids))
@@ -842,7 +839,7 @@ def main():
 
                     logger.info(
                         f"Step: {global_step + 1} "
-                        # f"Loss_t2i: {avg_loss_t2i.item():0.4f} "
+                        f"Loss_t2i: {avg_loss_t2i.item():0.4f} "
                         f"Loss_mmu: {avg_loss_mmu.item():0.4f} "
                         # f"Loss_lm: {avg_loss_lm.item():0.4f} "
                         f"Data (t): {data_time_m.val:0.4f}, {samples_per_second_per_gpu:0.2f}/s/gpu "

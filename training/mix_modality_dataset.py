@@ -22,7 +22,7 @@ import torch
 from PIL import ImageFile
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from PIL import Image
+from PIL import Image, ImageDraw
 from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
 from training.utils import image_transform
@@ -38,6 +38,7 @@ import pickle
 import numpy as np
 import collections
 from transformers import CLIPImageProcessor
+import re
 
 
 def preprocess_multimodal(sources):
@@ -144,174 +145,67 @@ def preprocess_v0(
     )
 
 
-# class nuscenesDataset(DatasetFolder):
 class MixModalityDataset(Dataset):
 
     def __init__(
         self,
         tokenizer,
-        # root: str,
-        # loader: Callable[[str], Any] = default_loader,
-        # is_valid_file: Optional[Callable[[str], bool]] = None,
         image_size=256,
+        data_info=None,
+        world_size=None,
+        local_rank=None,
     ):
         super(MixModalityDataset, self).__init__()
 
         self.tokenizer = tokenizer
-
-        IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
-
         self.transform = image_transform
         self.image_size = image_size
-        # self.loader = loader
-
-        # super().__init__(
-        #     root,
-        #     loader,
-        #     IMG_EXTENSIONS if is_valid_file is None else None,
-        #     transform=self.transform,
-        #     target_transform=None,
-        #     is_valid_file=is_valid_file,
-        # )
-
-        # with open('./training/imagenet_label_mapping', 'r') as f:
-        #     self.labels = {}
-        #     for l in f:
-        #         num, description = l.split(":")
-        #         self.labels[int(num)] = description.strip()
-
-        # print("ImageNet dataset loaded.")
 
         self.answers = []
         self.questions = []
         self.images = []
         self.tmp_imglist = []
+        self.tasks = []
 
-        # sample_rate = 2
+        vision_tower_name = "openai/clip-vit-large-patch14-336"
+        self.clip_image_processor = CLIPImageProcessor.from_pretrained(vision_tower_name)
 
-        # imageset = "data/nuscenes/nuscenes_infos_train_temporal_v3_scene.pkl"
-        # imageset = "data/nuscenes/nuscenes_infos_val_temporal_v3_scene.pkl"
+        if data_info is None:
+            self.data_info = pickle.load(open('data/nuscenes/bevdetv2-nuscenes_infos_train_split/bevdetv2-nuscenes_infos_val_split.pkl', "rb"))["infos"]
+        else:
+            self.data_info = data_info
 
-        # self.default_video()
         self.default_drivelm()
 
+        if local_rank is not None:
+            num_samples = len(self.questions)
+            each_samples = num_samples // world_size
 
-    def default_video(self):
-        self.images = []
-
-        imageset = "data/nuscenes/nuscenes_infos_train_temporal_v3_scene.pkl"
-        # imageset = "data/nuscenes/nuscenes_infos_val_temporal_v3_scene.pkl"
-
-        # imageset = root
-
-        with open(imageset, 'rb') as f:
-            data = pickle.load(f)
-        
-        self.nusc_infos = data['infos']
-        self.scene_names = list(self.nusc_infos.keys())   
-
-        self.scene_lens = [len(self.nusc_infos[sn]) for sn in self.scene_names]
-        self.return_len = 6
-        # self.return_len = 3
-        # self.return_len = 4
-
-        past_length = 3
-        future_length = 3
-        sample_rate = 2
-
-        self.offset = 0        
-        self.times = 20
-
-        idx_image = 0
-        self.idx_image_nusc_info = {}
-        self.gt_ego_poses = {}
-        self.gt_ego_poses_mask = {}
-        self.time_stamp = {}
-        self.token = {}
-
-        self.scene_videos = []
-        self.scene_videos_gt_ego_poses = []
-        self.scene_videos_gt_ego_poses_mask = []
-
-        self.dict_scene_videos = {}
-        self.dict_scene_videos_gt_ego_poses = {}
-        self.dict_scene_videos_gt_ego_poses_mask = {}
-        self.dict_scene_token = {}
-
-        for cur_scene_name in self.scene_names:
-            self.idx_image_nusc_info[cur_scene_name] = []
-            self.gt_ego_poses[cur_scene_name] = []
-            self.gt_ego_poses_mask[cur_scene_name] = []
-            self.time_stamp[cur_scene_name] = []
-            self.token[cur_scene_name] = []
-
-            for cur_info_idx, cur_info in enumerate(self.nusc_infos[cur_scene_name]):
-                # if cur_info_idx == 0:
-                #     self.gt_ego_poses[cur_scene_name].append(cur_info['gt_ego_his_trajs'][-1])
-
-                image_path = cur_info['cams']['CAM_FRONT']['data_path']
-                self.images.append(image_path)
-                self.idx_image_nusc_info[cur_scene_name].append(idx_image)
-                self.gt_ego_poses[cur_scene_name].append(cur_info['gt_ego_fut_trajs'][0])
-                self.gt_ego_poses_mask[cur_scene_name].append(cur_info['gt_ego_fut_masks'][0])
-                self.time_stamp[cur_scene_name].append(cur_info['timestamp'])
-                self.token[cur_scene_name].append(cur_info['token'])
-
-                idx_image = idx_image + 1
-
-            cur_scene_len = len(self.nusc_infos[cur_scene_name])
-            if cur_scene_len >= self.return_len:
-                for start_idx in range(cur_scene_len - (self.return_len - 1) * sample_rate):
-
-                    # self.scene_videos.append(self.idx_image_nusc_info[cur_scene_name][start_idx:start_idx+self.return_len])
-                    # self.scene_videos_gt_ego_poses.append(self.gt_ego_poses[cur_scene_name][start_idx:start_idx+self.return_len])
-                    # self.scene_videos_gt_ego_poses_mask.append(self.gt_ego_poses_mask[cur_scene_name][start_idx:start_idx+self.return_len])
-
-                    self.scene_videos.append(self.idx_image_nusc_info[cur_scene_name][start_idx:start_idx+self.return_len*sample_rate:sample_rate])
-                    self.scene_videos_gt_ego_poses.append(self.gt_ego_poses[cur_scene_name][start_idx:start_idx+self.return_len*sample_rate:sample_rate])
-                    self.scene_videos_gt_ego_poses_mask.append(self.gt_ego_poses_mask[cur_scene_name][start_idx:start_idx+self.return_len*sample_rate:sample_rate])
-
-                    cur_token = self.token[cur_scene_name][start_idx]
-                    cur_time_stamp = self.time_stamp[cur_scene_name][start_idx]
-                    self.dict_scene_videos[cur_time_stamp] = self.idx_image_nusc_info[cur_scene_name][start_idx:start_idx+self.return_len*sample_rate:sample_rate]
-                    self.dict_scene_videos_gt_ego_poses[cur_time_stamp] = self.gt_ego_poses[cur_scene_name][start_idx:start_idx+self.return_len*sample_rate:sample_rate]
-                    self.dict_scene_videos_gt_ego_poses_mask[cur_time_stamp] = self.gt_ego_poses_mask[cur_scene_name][start_idx:start_idx+self.return_len*sample_rate:sample_rate]
-                    self.dict_scene_token[cur_token] = cur_time_stamp
-
-        # self.scene_videos_gt_ego_poses = np.array(self.scene_videos_gt_ego_poses)
-        # self.scene_videos_gt_ego_poses_mask = np.array(self.scene_videos_gt_ego_poses_mask)
-
-        self.samples = self.images
+            if local_rank == (world_size - 1):
+                self.questions = self.questions[each_samples*local_rank:]
+                self.answers = self.answers[each_samples*local_rank:]
+                self.tmp_imglist = self.tmp_imglist[each_samples*local_rank:]
+                self.tasks = self.tasks[each_samples*local_rank:]
+            else:
+                self.questions = self.questions[each_samples*local_rank:each_samples*(local_rank+1)]
+                self.answers = self.answers[each_samples*local_rank:each_samples*(local_rank+1)]
+                self.tmp_imglist = self.tmp_imglist[each_samples*local_rank:each_samples*(local_rank+1)]
+                self.tasks = self.tasks[each_samples*local_rank:each_samples*(local_rank+1)]
 
 
-    # def default_drivelm(self, ann_paths):
     def default_drivelm(self):
         self.temporal_length = 6
-        past_length = 3
-        future_length = 3
+        # past_length = 3
+        # future_length = 3
+        past_length = 2
+        future_length = 2
         sample_rate = 2
 
-        # dict_nusc_info = {}
-        # for cur_scene_name in self.scene_names:
-        #     for cur_info_idx, cur_nusc_info in enumerate(self.nusc_infos[cur_scene_name]):            
-        #         scene_token = cur_nusc_info['token']
-        #         dict_nusc_info[scene_token] = cur_nusc_info
+        # self.annotation = json.load(open('data/drivelm_train.json', "r"))
+        # self.data_info = pickle.load(open('data/nuscenes/bevdetv2-nuscenes_infos_train_split/bevdetv2-nuscenes_infos_train_split.pkl', "rb"))["infos"]
 
-        # # self.annotation = json.load(open(ann_paths[0], "r"))
-        # # self.annotation = json.load(open('data/drivelm_train.json', "r"))
-        # self.annotation = json.load(open('data/drivelm_train_split/drivelm_train.json', "r"))
-        # bevdetv2_nuscenes_infos_train = pickle.load(open("data/nuscenes/bevdetv2-nuscenes_infos_train.pkl", "rb"))
-        # self.data_info = bevdetv2_nuscenes_infos_train["infos"]
-        # for idx, info in enumerate(self.data_info):
-        #     scene_token = info['token']
-        #     timestamp = info['cams']['CAM_FRONT']['timestamp']
-        #     image_path = info['cams']["CAM_FRONT"]['data_path']
-        #     if scene_token in dict_nusc_info:
-        #         info_2 = dict_nusc_info[scene_token]
-        #         print()
-
-        self.annotation = json.load(open('data/drivelm_train.json', "r"))
-        self.data_info = pickle.load(open('data/nuscenes/bevdetv2-nuscenes_infos_train_split/bevdetv2-nuscenes_infos_train_split.pkl', "rb"))["infos"]
+        self.annotation = json.load(open('data/converted_drivelm_train_range_zero_one.json', "r"))
+        # self.data_info = pickle.load(open('data/nuscenes/bevdetv2-nuscenes_infos_train_split/bevdetv2-nuscenes_infos_val_split.pkl', "rb"))["infos"]
 
         for idx, info in enumerate(self.data_info):
             scene_token = info['scene_token']
@@ -339,6 +233,7 @@ class MixModalityDataset(Dataset):
                 tmp_path = self.data_info[idx+tmp]['cams']['CAM_FRONT']['data_path']
                 future_tmp_image.append(tmp_path)
 
+            # if len(future_tmp_image) > 0:
             # if the image path is not equal self.temporal length, then use the duplicate image path
             if len(future_tmp_image) != future_length:
                 future_tmp_image = future_tmp_image + ['pad'] * (future_length - len(future_tmp_image))
@@ -346,11 +241,7 @@ class MixModalityDataset(Dataset):
 
             tmp_image = past_tmp_image + future_tmp_image
 
-            if scene_token not in self.annotation:
-                self.questions.append('pad')
-                self.answers.append(['pad'])
-                self.tmp_imglist.append(tmp_image)
-            else:
+            if scene_token in self.annotation:
                 value = self.annotation[scene_token]
                 # scene_description = value['scene_description']
                 scene_key_frame = value['key_frame']
@@ -361,21 +252,25 @@ class MixModalityDataset(Dataset):
                     if "Perception" in value1:
                         Perception_q = value1['Perception']['q']
                         Perception_a = value1['Perception']['a']
+                        Perception_task = ['Perception'] * len(Perception_q)
                     else:
                         Perception_q = []
                         Perception_a = []
+                        Perception_task = []
 
                     if "Prediction and Planning" in value1:
                         Prediction_q = value1['Prediction and Planning']['q']
                         Prediction_a = value1['Prediction and Planning']['a']
+                        Prediction_task = ['Prediction and Planning'] * len(Prediction_q)
                     else:
                         Prediction_q = []
                         Prediction_a = []
-                                        
+                        Prediction_task = []
+       
 
                     Question = Perception_q + Prediction_q
                     Answer = Perception_a + Prediction_a
-
+                    Name_task = Perception_task + Prediction_task
                 
                     assert len(Question) == len(Answer)
 
@@ -396,47 +291,86 @@ class MixModalityDataset(Dataset):
                         or "back" in cur_answer:
                             continue
 
-                        # if "CAM_FRONT" in cur_question or "CAM_FRONT" in cur_answer:
-                        #     continue
 
                         self.questions.append(Question[idx])
                         self.answers.append([Answer[idx]])
                         self.tmp_imglist.append(tmp_image)
+                        self.tasks.append(Name_task[idx])
 
-                else:
-                    self.questions.append('pad')
-                    self.answers.append(['pad'])
-                    self.tmp_imglist.append(tmp_image)
+        # all_idx = []
+        # for idx_question, cur_question in enumerate(self.questions):
+        #     # if "What is the movement of object <c1,CAM_FRONT,0.47,0.55>?" in cur_question:
+        #     # if "Would <c2,CAM_FRONT,0.20,0.59> be in the moving direction of the ego vehicle?" in cur_question:
+        #     # if "What is the moving status of object <c3,CAM_FRONT,0.76,0.52>?" in cur_question:
+        #     # if "What is the future state of <c1,CAM_FRONT,0.61,0.59>?" in cur_question:
+        #     # if "What is the goal action of the ego vehicle?" in cur_question:
+        #     # if "What is the visual description of <c2,CAM_FRONT,0.01,0.52>?" in cur_question:
+        #     # if "Would <c2,CAM_FRONT,0.17,0.59> be in the moving direction of the ego vehicle?" in cur_question:
+        #     # if "What actions taken by the ego vehicle can lead to a collision with <c2,CAM_FRONT,0.49,0.53>?" in cur_question:
+        #     # if "Would <c4,CAM_FRONT,0.81,0.55> be in the moving direction of the ego vehicle?" in cur_question:
+        #     # if "What is the movement of object <c2,CAM_FRONT,0.98,0.53>?" in cur_question:
+        #     # if "What is the movement of object <c1,CAM_FRONT,0.01,0.54>?" in cur_question:
+        #     # if "What is the movement of object <c3,CAM_FRONT,0.97,0.53>?" in cur_question:
+        #     # if "What is the movement of object <c1,CAM_FRONT,0.37,0.53>?" in cur_question:
+        #     # if "What is the movement of object <c5,CAM_FRONT,0.93,0.56>?" in cur_question:
+        #     # if "What is the movement of object <c3,CAM_FRONT,0.16,0.58>?" in cur_question:
+        #     # if "What is the movement of object <c2,CAM_FRONT,0.83,0.58>?" in cur_question:
+        #     # if "What is the movement of object <c2,CAM_FRONT,0.62,0.53>?" in cur_question:
+        #     # if "What is the movement of object <c1,CAM_FRONT,0.64,0.52>?" in cur_question:
+        #     # if "What is the movement of object <c4,CAM_FRONT,0.53,0.50>?" in cur_question:
+        #     if "Is it necessary for the ego vehicle to take <c4,CAM_FRONT,0.74,0.43> into account?" in cur_question:
+        #         all_idx.append(idx_question)
 
         # print()
 
     def __len__(self) -> int:
-        # return len(self.samples)
-        # return len(self.scene_videos)
-        return len(self.questions)
+        # return len(self.questions)
+        return len(self.tmp_imglist)
+    
 
     def __getitem__(self, i):
+        # i = 1710
+        # i = 1722
+        # i = 1729
+        # i = 4944
+        # i = 12720
+        # i = 1677
+        # i = 8333
+        # i = 8234
+        # i = 3248
+        # i = 3238
+        # i = 3193
+        # i = 1618
+        # i = 3141
+        # i = 13308
+        # i = 13298
+        # i = 3121
+        # i = 5353
+        # i = 8616
+        i = 7465
+
+
         cur_question = self.questions[i]
         cur_answer = self.answers[i][0]
 
         cur_question = cur_question[3:]
         cur_answer = cur_answer[3:]
 
-        sources = {
-            "conversations": [
-                {
-                    "from": "human",
-                    "value": "<image>\n" + cur_question
-                },
-                {
-                    "from": "gpt",
-                    "value": cur_answer
-                },
-            ]
-        }
-        if isinstance(i, int):
-            sources = [sources]
-        assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
+        # sources = {
+        #     "conversations": [
+        #         {
+        #             "from": "human",
+        #             "value": "<image>\n" + cur_question
+        #         },
+        #         {
+        #             "from": "gpt",
+        #             "value": cur_answer
+        #         },
+        #     ]
+        # }
+        # if isinstance(i, int):
+        #     sources = [sources]
+        # assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
 
         # cur_image_path = self.images[i]
         # try:
@@ -449,20 +383,77 @@ class MixModalityDataset(Dataset):
 
         path_list = self.tmp_imglist[i]
         image_list = []
-        for cur_image_path in path_list:
-            cur_image = Image.open(cur_image_path).convert('RGB')
-            cur_image = image_transform(cur_image)
+        bool_pad_image_list = []
+        for cur_timestamp, cur_image_path in enumerate(path_list):
+            if cur_image_path == 'pad':
+                crop_size = 256
+                cur_image = torch.zeros(3, crop_size, crop_size)
+                bool_pad_image_list.append(True)
+            else:
+                cur_image = Image.open(cur_image_path).convert('RGB')
+
+                def expand2square(pil_img, background_color):
+                    width, height = pil_img.size
+                    if width == height:
+                        return pil_img
+                    elif width > height:
+                        result = Image.new(pil_img.mode, (width, width), background_color)
+                        result.paste(pil_img, (0, (width - height) // 2))
+                        return result
+                    else:
+                        result = Image.new(pil_img.mode, (height, height), background_color)
+                        result.paste(pil_img, ((height - width) // 2, 0))
+                        return result
+                cur_image = expand2square(cur_image, tuple(int(x*255) for x in self.clip_image_processor.image_mean))
+                
+
+                cur_image_copy = cur_image.copy()
+                if cur_timestamp == 1:
+                    def convert_width_height(match):
+                        string_value, float_value1, float_value2 = match.group(1, 2, 3)
+                        float_value1 = float(float_value1)
+                        float_value2 = float(float_value2)
+                        return float_value1, float_value2
+
+
+                    def convert_string(input_string):
+                        pattern = r"<([^>]+),(\d+\.\d+),(\d+\.\d+)>"
+                        output_string = re.findall(pattern, convert_width_height, input_string)
+                        return output_string
+
+                    x_range_0_1, y_range_0_1 = convert_string(cur_question)
+                    point_coordinates = (int(1600*x_range_0_1), int(1600*y_range_0_1))  # x, y coordinates
+                    draw = ImageDraw.Draw(cur_image_copy)
+                    point_color = (255, 0, 0)  # Red color
+                    point_size = 5  # Size of the point
+                    draw.rectangle([point_coordinates[0] - point_size, point_coordinates[1] - point_size,
+                                    point_coordinates[0] + point_size, point_coordinates[1] + point_size], 
+                                fill=point_color)
+                cur_image_copy.save('orig_{}.jpg'.format(cur_timestamp))
+
+
+                cur_image = image_transform(cur_image)
+                bool_pad_image_list.append(False)
             image_list.append(cur_image)
         image = torch.stack(image_list, dim=0)
+        bool_pad_image = torch.tensor(bool_pad_image_list)
+        data_dict = {}
+        data_dict['bool_pad_image'] = bool_pad_image
 
-        sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]))
+        # TODO
+        input_ids = self.tokenizer(['USER: \n' + cur_question + ' ASSISTANT:'])[
+            'input_ids']
+        input_ids = torch.tensor(input_ids[0])
+        data_dict['input_ids'] = input_ids
 
-        data_dict = preprocess_v0(sources, self.tokenizer)
+        # sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]))
 
-        if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0],
-                             labels=data_dict["labels"][0],
-                             input_ids_system=data_dict["input_ids_system"][0])
+        # data_dict = preprocess_v0(sources, self.tokenizer)
+
+        # if isinstance(i, int):
+        #     data_dict = dict(input_ids=data_dict["input_ids"][0],
+        #                      labels=data_dict["labels"][0],
+        #                      input_ids_system=data_dict["input_ids_system"][0])
 
         # image exist in the data
         # if 'image' in self.list_data_dict[i]:
@@ -472,7 +463,10 @@ class MixModalityDataset(Dataset):
         #     crop_size = 256
         #     data_dict['image'] = torch.zeros(3, crop_size, crop_size)
 
-        data_dict['image'] = image
+        data_dict['images'] = image
+        data_dict['question'] = cur_question
+        data_dict['answer'] = cur_answer
+        data_dict['task'] = self.tasks[i]
 
         return data_dict
 
@@ -953,7 +947,68 @@ def get_drivelm_mix_modality_data_loader(
     return dataloader, len(train_dataset)
 
 
-def get_mix_modality_data_loader(
+def collate_fn_val(
+        instances,
+        tokenizer=None,
+        max_length=77,
+):
+    # input_ids, labels, input_ids_system = tuple([instance[key] for instance in instances]
+    #                                             for key in ("input_ids", "labels", "input_ids_system"))
+    input_ids = [instance['input_ids'] for instance in instances]
+
+    input_ids = torch.nn.utils.rnn.pad_sequence(
+        input_ids,
+        batch_first=True,
+        padding_value=tokenizer.pad_token_id)
+    # labels = torch.nn.utils.rnn.pad_sequence(labels,
+    #                                          batch_first=True,
+    #                                          padding_value=IGNORE_INDEX)
+    # input_ids_system = torch.stack(input_ids_system, dim=0)
+
+    # offset = max_length - input_ids.shape[-1] - input_ids_system.shape[-1]
+
+    # if input_ids.shape[-1] < max_length - input_ids_system.shape[-1]:
+    #     pad_tube = torch.ones(size=(input_ids.shape[0], offset), dtype=input_ids.dtype) * tokenizer.pad_token_id
+    #     input_ids = torch.cat([input_ids, pad_tube], dim=1)
+
+    #     pad_tube = torch.ones(size=(labels.shape[0], offset), dtype=labels.dtype) * IGNORE_INDEX
+    #     labels = torch.cat([labels, pad_tube], dim=1)
+
+    # min_max_len = min(
+    #     max_length - input_ids_system.shape[-1],
+    #     tokenizer.model_max_length - input_ids_system.shape[-1],
+    # )
+
+    # input_ids = input_ids[:, :min_max_len]
+    # labels = labels[:, :min_max_len]
+    batch = dict(
+        input_ids=input_ids,
+        # labels=labels,
+        attention_mask=input_ids.ne(tokenizer.pad_token_id),
+        # input_ids_system=input_ids_system,
+    )
+
+    # if 'image' in instances[0]:
+    #     images = [instance['image'] for instance in instances]
+    #     if all(x is not None and x.shape == images[0].shape for x in images):
+    #         batch['images'] = torch.stack(images)
+    #     else:
+    #         batch['images'] = images
+
+    images = [instance['images'] for instance in instances]
+    batch['images'] = torch.stack(images)
+
+    bool_pad_image = [instance['bool_pad_image'] for instance in instances]
+    batch['bool_pad_image'] = torch.stack(bool_pad_image)
+
+    batch['question'] = [instance['question'] for instance in instances]
+    batch['answer'] = [instance['answer'] for instance in instances]
+    batch['task'] = [instance['task'] for instance in instances]
+
+    return batch
+
+
+def get_mix_modality_data_loader_val(
         tokenizer,
         batch_size,
         num_workers,
@@ -961,23 +1016,31 @@ def get_mix_modality_data_loader(
         local_rank,
         max_length,
         phase,
+        training=False,
+        data_info=None,
 ):
     train_dataset = MixModalityDataset(
         tokenizer,
         # phase,
+        training,
+        data_info,
+        world_size,
+        local_rank,
     )
-    datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank)
+    # datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank)
+    # datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank, shuffle=training)
+
     dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=True,
         collate_fn=partial(
-            collate_fn,
+            collate_fn_val,
             tokenizer=tokenizer,
             max_length=max_length,
         ),
-        sampler=datasampler
+        # sampler=datasampler
     )
 
     return dataloader, len(train_dataset)

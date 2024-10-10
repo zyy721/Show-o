@@ -727,6 +727,8 @@ def create_attention_mask_for_mmu(sequence, eoi_id=128258, return_inverse_mask=T
     causal_mask = torch.tril(torch.ones((N, 1, L, L), dtype=torch.bool)).to(sequence.device)
     eoi_image = torch.where(sequence == eoi_id)[1]
     causal_mask[:, :, :, :eoi_image[0] + 1] = 1
+    # causal_mask[:, :, :, :eoi_image[-1] + 1] = 1
+
 
     if return_inverse_mask:
         inverted_mask = 1.0 - causal_mask.type(sequence.dtype)
