@@ -347,7 +347,7 @@ class MixModalityDataset(Dataset):
         # i = 3121
         # i = 5353
         # i = 8616
-        i = 7465
+        # i = 7465
 
 
         cur_question = self.questions[i]
@@ -407,29 +407,29 @@ class MixModalityDataset(Dataset):
                 cur_image = expand2square(cur_image, tuple(int(x*255) for x in self.clip_image_processor.image_mean))
                 
 
-                cur_image_copy = cur_image.copy()
-                resolution = 256
-                from torchvision import transforms
-                cur_image_copy = transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BICUBIC)(cur_image_copy)
-                cur_image_copy = transforms.CenterCrop((resolution, resolution))(cur_image_copy)
-                if cur_timestamp == 1:
-                    def convert_string(input_string):
-                        pattern = r"<([^>]+),(\d+\.\d+),(\d+\.\d+)>"
-                        match = re.search(pattern, input_string)
-                        string_value, float_value1, float_value2 = match.group(1, 2, 3)
-                        float_value1 = float(float_value1)
-                        float_value2 = float(float_value2)
-                        return float_value1, float_value2
+                # cur_image_copy = cur_image.copy()
+                # resolution = 256
+                # from torchvision import transforms
+                # cur_image_copy = transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BICUBIC)(cur_image_copy)
+                # cur_image_copy = transforms.CenterCrop((resolution, resolution))(cur_image_copy)
+                # if cur_timestamp == 1:
+                #     def convert_string(input_string):
+                #         pattern = r"<([^>]+),(\d+\.\d+),(\d+\.\d+)>"
+                #         match = re.search(pattern, input_string)
+                #         string_value, float_value1, float_value2 = match.group(1, 2, 3)
+                #         float_value1 = float(float_value1)
+                #         float_value2 = float(float_value2)
+                #         return float_value1, float_value2
 
-                    x_range_0_1, y_range_0_1 = convert_string(cur_question)
-                    point_coordinates = (int(cur_image_copy.size[0]*x_range_0_1), int(cur_image_copy.size[1]*y_range_0_1))  # x, y coordinates
-                    draw = ImageDraw.Draw(cur_image_copy)
-                    point_color = (255, 0, 0)  # Red color
-                    point_size = 5  # Size of the point
-                    draw.rectangle([point_coordinates[0] - point_size, point_coordinates[1] - point_size,
-                                    point_coordinates[0] + point_size, point_coordinates[1] + point_size], 
-                                fill=point_color)
-                cur_image_copy.save('orig_{}.jpg'.format(cur_timestamp))
+                #     x_range_0_1, y_range_0_1 = convert_string(cur_question)
+                #     point_coordinates = (int(cur_image_copy.size[0]*x_range_0_1), int(cur_image_copy.size[1]*y_range_0_1))  # x, y coordinates
+                #     draw = ImageDraw.Draw(cur_image_copy)
+                #     point_color = (255, 0, 0)  # Red color
+                #     point_size = 5  # Size of the point
+                #     draw.rectangle([point_coordinates[0] - point_size, point_coordinates[1] - point_size,
+                #                     point_coordinates[0] + point_size, point_coordinates[1] + point_size], 
+                #                 fill=point_color)
+                # cur_image_copy.save('orig_{}.jpg'.format(cur_timestamp))
 
 
                 cur_image = image_transform(cur_image)
@@ -654,7 +654,8 @@ class DriveLMMixModalityDataset(Dataset):
         self,
         tokenizer,
         image_size=256,
-        w_clip=False
+        w_clip=False,
+        val=False
     ):
         super(DriveLMMixModalityDataset, self).__init__()
 
@@ -666,11 +667,13 @@ class DriveLMMixModalityDataset(Dataset):
         self.questions = []
         self.images = []
         self.tmp_imglist = []
+        self.tasks = []
 
         vision_tower_name = "openai/clip-vit-large-patch14-336"
         self.clip_image_processor = CLIPImageProcessor.from_pretrained(vision_tower_name)
         self.w_clip = w_clip
 
+        self.val = val
         self.default_drivelm()
 
 
@@ -678,14 +681,17 @@ class DriveLMMixModalityDataset(Dataset):
         # self.temporal_length = 6
         # past_length = 3
         # future_length = 3
-        self.temporal_length = 4
+        self.temporal_length = 2
         self.past_length = 2
-        future_length = 2
+        future_length = 0
         sample_rate = 2
 
         # self.annotation = json.load(open('data/drivelm_train.json', "r"))
         self.annotation = json.load(open('data/converted_drivelm_train_range_zero_one.json', "r"))
-        self.data_info = pickle.load(open('data/nuscenes/bevdetv2-nuscenes_infos_train_split/bevdetv2-nuscenes_infos_train_split.pkl', "rb"))["infos"]
+        if self.val:
+            self.data_info = pickle.load(open('data/nuscenes/bevdetv2-nuscenes_infos_train_split/bevdetv2-nuscenes_infos_val_split.pkl', "rb"))["infos"]
+        else:
+            self.data_info = pickle.load(open('data/nuscenes/bevdetv2-nuscenes_infos_train_split/bevdetv2-nuscenes_infos_train_split.pkl', "rb"))["infos"]
 
         for idx, info in enumerate(self.data_info):
             scene_token = info['scene_token']
@@ -731,21 +737,25 @@ class DriveLMMixModalityDataset(Dataset):
                     if "Perception" in value1:
                         Perception_q = value1['Perception']['q']
                         Perception_a = value1['Perception']['a']
+                        Perception_task = ['Perception'] * len(Perception_q)
                     else:
                         Perception_q = []
                         Perception_a = []
+                        Perception_task = []
 
                     if "Prediction and Planning" in value1:
                         Prediction_q = value1['Prediction and Planning']['q']
                         Prediction_a = value1['Prediction and Planning']['a']
+                        Prediction_task = ['Prediction and Planning'] * len(Prediction_q)
                     else:
                         Prediction_q = []
                         Prediction_a = []
+                        Prediction_task = []
                                         
 
                     Question = Perception_q + Prediction_q
                     Answer = Perception_a + Prediction_a
-
+                    Name_task = Perception_task + Prediction_task
                 
                     assert len(Question) == len(Answer)
 
@@ -772,6 +782,7 @@ class DriveLMMixModalityDataset(Dataset):
                         self.questions.append(Question[idx])
                         self.answers.append([Answer[idx]])
                         self.tmp_imglist.append(tmp_image)
+                        self.tasks.append(Name_task[idx])
 
         # print()
 
@@ -852,15 +863,32 @@ class DriveLMMixModalityDataset(Dataset):
         image = torch.stack(image_list, dim=0)
         bool_pad_image = torch.tensor(bool_pad_image_list)
         
+        if self.val:        
+            question = sources[0]["conversations"][0]["value"]
+            conv = conversation_lib.default_conversation.copy()
+            conv.append_message(conv.roles[0], question)
+            conv.append_message(conv.roles[1], None)
+            prompt_question = conv.get_prompt()
+            question_input = []
+            question_input.append(prompt_question.strip())
 
-        sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]))
+            input_ids_system = self.tokenizer(SYSTEM_PROMPT, return_tensors="pt", padding="longest").input_ids
+            assert input_ids_system.shape[-1] == 28
+            input_ids = self.tokenizer(question_input[0], return_tensors="pt", padding="longest").input_ids
 
-        data_dict = preprocess_v0(sources, self.tokenizer)
+            data_dict = dict(input_ids=input_ids,
+                             labels=torch.tensor([[0]]),
+                             input_ids_system=input_ids_system)
+                
+        else:
+            sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]))
+
+            data_dict = preprocess_v0(sources, self.tokenizer)
 
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0],
-                             labels=data_dict["labels"][0],
-                             input_ids_system=data_dict["input_ids_system"][0])
+                            labels=data_dict["labels"][0],
+                            input_ids_system=data_dict["input_ids_system"][0])
 
         # image exist in the data
         # if 'image' in self.list_data_dict[i]:
@@ -873,6 +901,11 @@ class DriveLMMixModalityDataset(Dataset):
         data_dict['image'] = image
         data_dict['bool_pad_image'] = bool_pad_image
 
+        if self.val:
+            data_dict['question'] = cur_question
+            data_dict['answer'] = cur_answer
+            data_dict['task'] = self.tasks[i]
+
         return data_dict
 
 
@@ -881,6 +914,7 @@ def collate_fn(
         instances,
         tokenizer=None,
         max_length=77,
+        val=False,
 ):
     input_ids, labels, input_ids_system = tuple([instance[key] for instance in instances]
                                                 for key in ("input_ids", "labels", "input_ids_system"))
@@ -893,22 +927,26 @@ def collate_fn(
                                              padding_value=IGNORE_INDEX)
     input_ids_system = torch.stack(input_ids_system, dim=0)
 
-    offset = max_length - input_ids.shape[-1] - input_ids_system.shape[-1]
+    if val:
+        pass
+    else:
+        offset = max_length - input_ids.shape[-1] - input_ids_system.shape[-1]
 
-    if input_ids.shape[-1] < max_length - input_ids_system.shape[-1]:
-        pad_tube = torch.ones(size=(input_ids.shape[0], offset), dtype=input_ids.dtype) * tokenizer.pad_token_id
-        input_ids = torch.cat([input_ids, pad_tube], dim=1)
+        if input_ids.shape[-1] < max_length - input_ids_system.shape[-1]:
+            pad_tube = torch.ones(size=(input_ids.shape[0], offset), dtype=input_ids.dtype) * tokenizer.pad_token_id
+            input_ids = torch.cat([input_ids, pad_tube], dim=1)
 
-        pad_tube = torch.ones(size=(labels.shape[0], offset), dtype=labels.dtype) * IGNORE_INDEX
-        labels = torch.cat([labels, pad_tube], dim=1)
+            pad_tube = torch.ones(size=(labels.shape[0], offset), dtype=labels.dtype) * IGNORE_INDEX
+            labels = torch.cat([labels, pad_tube], dim=1)
 
-    min_max_len = min(
-        max_length - input_ids_system.shape[-1],
-        tokenizer.model_max_length - input_ids_system.shape[-1],
-    )
+        min_max_len = min(
+            max_length - input_ids_system.shape[-1],
+            tokenizer.model_max_length - input_ids_system.shape[-1],
+        )
 
-    input_ids = input_ids[:, :min_max_len]
-    labels = labels[:, :min_max_len]
+        input_ids = input_ids[:, :min_max_len]
+        labels = labels[:, :min_max_len]
+
     batch = dict(
         input_ids=input_ids,
         labels=labels,
@@ -926,6 +964,11 @@ def collate_fn(
     bool_pad_image = [instance['bool_pad_image'] for instance in instances]
     batch['bool_pad_image'] = torch.stack(bool_pad_image)
 
+    if val:
+        batch['question'] = [instance['question'] for instance in instances]
+        batch['answer'] = [instance['answer'] for instance in instances]
+        batch['task'] = [instance['task'] for instance in instances]
+
     return batch
 
 
@@ -938,6 +981,7 @@ def get_drivelm_mix_modality_data_loader(
         max_length,
         phase,
         w_clip=False,
+        val=False,
 ):
     # train_dataset = MixModalityDataset(
     #     tokenizer,
@@ -947,20 +991,38 @@ def get_drivelm_mix_modality_data_loader(
         tokenizer,
         # phase,
         w_clip=w_clip,
+        val=val,
     )
-    datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank)
-    dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        collate_fn=partial(
-            collate_fn,
-            tokenizer=tokenizer,
-            max_length=max_length,
-        ),
-        sampler=datasampler
-    )
+
+    if val:
+        # datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank)
+        dataloader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            collate_fn=partial(
+                collate_fn,
+                tokenizer=tokenizer,
+                max_length=max_length,
+                val=True,
+            ),
+            # sampler=datasampler
+        )
+    else:
+        datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank)
+        dataloader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            collate_fn=partial(
+                collate_fn,
+                tokenizer=tokenizer,
+                max_length=max_length,
+            ),
+            sampler=datasampler
+        )
 
     return dataloader, len(train_dataset)
 

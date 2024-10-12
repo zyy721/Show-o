@@ -53,6 +53,11 @@ from torch.utils.data.distributed import DistributedSampler
 from training.utils import get_config, flatten_omega_conf, mask_or_random_replace_tokens, AverageMeter
 
 from training.mix_modality_dataset import get_drivelm_mix_modality_data_loader
+import accelerate
+from accelerate.state import AcceleratorState
+from transformers.utils import ContextManagers
+from transformers import CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
+
 
 SYSTEM_PROMPT_LEN = 28
 
@@ -208,7 +213,22 @@ def main():
                 else:
                     p.requires_grad = False
 
+    # def deepspeed_zero_init_disabled_context_manager():
+    #     """
+    #     returns either a context list that includes one that will disable zero.Init or an empty context list
+    #     """
+    #     deepspeed_plugin = AcceleratorState().deepspeed_plugin if accelerate.state.is_initialized() else None
+    #     if deepspeed_plugin is None:
+    #         return []
+
+    #     return [deepspeed_plugin.zero3_init_context_manager(enable=False)]
+
+    # with ContextManagers(deepspeed_zero_init_disabled_context_manager()):
+    #     # vision_tower = CLIPVisionTower("openai/clip-vit-large-patch14-336").to(accelerator.device)
+    #     vision_tower = CLIPVisionModel.from_pretrained("openai/clip-vit-large-patch14-336").to(accelerator.device)
+
     vision_tower = CLIPVisionTower("openai/clip-vit-large-patch14-336").to(accelerator.device)
+
     vision_tower.eval()
     for p in vision_tower.parameters():
         p.requires_grad = False
@@ -562,6 +582,8 @@ def main():
                                                                                  batch["mmu_flow"]["bool_pad_image"])
 
                 pixel_values_mmu = pixel_values_mmu.to(accelerator.device, non_blocking=True)
+                pixel_values_mmu = pixel_values_mmu.to(mask_dtype)
+
                 input_ids_mmu = input_ids_mmu.to(accelerator.device, non_blocking=True)
                 input_ids_system = input_ids_system.to(accelerator.device, non_blocking=True)
                 bool_pad_image_mmu = bool_pad_image_mmu.to(accelerator.device, non_blocking=True)

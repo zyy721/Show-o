@@ -57,7 +57,7 @@ dataset:
         validation_prompts_file: "validation_prompts/showoprompts.txt"
         shuffle_buffer_size: 1000
         # num_workers: 32
-        num_workers: 8
+        num_workers: 4
     
         resolution: 256
         pin_memory: True
@@ -83,10 +83,13 @@ lr_scheduler:
     scheduler: "cosine"
     params:
         learning_rate: ${optimizer.params.learning_rate}
-        warmup_steps: 1000
+        # warmup_steps: 1000
+        warmup_steps: 10000
 
 training:
-    gradient_accumulation_steps: 1
+    # gradient_accumulation_steps: 1
+    gradient_accumulation_steps: 4
+    
     batch_size_t2i: 0
     batch_size_lm: 0
     # batch_size_mmu: 4
@@ -95,7 +98,9 @@ training:
     mixed_precision: "bf16"
     enable_tf32: True
     seed: 10086
-    max_train_steps: 100000
+    # max_train_steps: 100000
+    max_train_steps: 80000
+
     overfit_one_batch: False
     cond_dropout_prob: 0.1
     min_masking_rate: 0.0
