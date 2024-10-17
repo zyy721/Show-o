@@ -655,7 +655,9 @@ class DriveLMMixModalityDataset(Dataset):
         tokenizer,
         image_size=256,
         w_clip=False,
-        val=False
+        val=False,
+        world_size=None,
+        local_rank=None,
     ):
         super(DriveLMMixModalityDataset, self).__init__()
 
@@ -676,6 +678,21 @@ class DriveLMMixModalityDataset(Dataset):
         self.val = val
         self.default_drivelm()
 
+        if local_rank is not None:
+            num_samples = len(self.questions)
+            each_samples = num_samples // world_size
+
+            if local_rank == (world_size - 1):
+                self.questions = self.questions[each_samples*local_rank:]
+                self.answers = self.answers[each_samples*local_rank:]
+                self.tmp_imglist = self.tmp_imglist[each_samples*local_rank:]
+                self.tasks = self.tasks[each_samples*local_rank:]
+            else:
+                self.questions = self.questions[each_samples*local_rank:each_samples*(local_rank+1)]
+                self.answers = self.answers[each_samples*local_rank:each_samples*(local_rank+1)]
+                self.tmp_imglist = self.tmp_imglist[each_samples*local_rank:each_samples*(local_rank+1)]
+                self.tasks = self.tasks[each_samples*local_rank:each_samples*(local_rank+1)]
+                
 
     def default_drivelm(self):
         # self.temporal_length = 6
@@ -992,6 +1009,8 @@ def get_drivelm_mix_modality_data_loader(
         # phase,
         w_clip=w_clip,
         val=val,
+        world_size=world_size,
+        local_rank=local_rank,
     )
 
     if val:

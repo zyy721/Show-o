@@ -84,15 +84,15 @@ if __name__ == '__main__':
     model = Showo.from_pretrained(config.model.showo.pretrained_model_path).to(device)
 
 
-    # path = config.model.showo.resume_model_path
-    # state_dict = torch.load(f'{path}/unwrapped_model/pytorch_model.bin', map_location="cpu")
-    # model.load_state_dict(state_dict, strict=True)
-    # del state_dict
-    # dir_name, ckpt_itr_num = path.split('/')
-    # val_vqa_result_path = os.path.join(dir_name, 'val_vqa_result')
-    # if not os.path.exists(val_vqa_result_path):
-    #     os.makedirs(val_vqa_result_path)
-    # val_vqa_itr_result_json = os.path.join(val_vqa_result_path, 'val_{}_vqa_result.json'.format(ckpt_itr_num))
+    path = config.model.showo.resume_model_path
+    state_dict = torch.load(f'{path}/unwrapped_model/pytorch_model.bin', map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
+    del state_dict
+    dir_name, ckpt_itr_num = path.split('/')
+    val_vqa_result_path = os.path.join(dir_name, 'val_vqa_result')
+    if not os.path.exists(val_vqa_result_path):
+        os.makedirs(val_vqa_result_path)
+    val_vqa_itr_result_json = os.path.join(val_vqa_result_path, 'val_{}_vqa_result.json'.format(ckpt_itr_num))
 
 
     model.eval()

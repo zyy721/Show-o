@@ -4,7 +4,8 @@ import torch.nn as nn
 from transformers import CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
 
 class CLIPVisionTower(nn.Module):
-    def __init__(self, vision_tower):
+    # def __init__(self, vision_tower):
+    def __init__(self, vision_tower, device_map=None):
         super().__init__()
 
         self.is_loaded = False
@@ -12,7 +13,9 @@ class CLIPVisionTower(nn.Module):
         self.vision_tower_name = vision_tower
         self.select_layer = -2
         self.select_feature = "patch"
-        self.load_model()
+        # self.load_model()
+        self.load_model(device_map=device_map)
+
         self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
 
     def load_model(self, device_map=None):

@@ -82,16 +82,17 @@ def worker(rank, gpu_id, config, data_dict):
     vq_model.eval()
 
     vision_tower_name = "openai/clip-vit-large-patch14-336"
-    vision_tower =  CLIPVisionTower(vision_tower_name).to(device)
+    # vision_tower =  CLIPVisionTower(vision_tower_name).to(device)
+    vision_tower =  CLIPVisionTower(vision_tower_name, device_map=device)
     clip_image_processor = CLIPImageProcessor.from_pretrained(vision_tower_name)
 
     model = Showo.from_pretrained(config.model.showo.pretrained_model_path).to(device)
 
 
-    # path = config.model.showo.resume_model_path
-    # state_dict = torch.load(f'{path}/unwrapped_model/pytorch_model.bin', map_location="cpu")
-    # model.load_state_dict(state_dict, strict=True)
-    # del state_dict
+    path = config.model.showo.resume_model_path
+    state_dict = torch.load(f'{path}/unwrapped_model/pytorch_model.bin', map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
+    del state_dict
     # dir_name, ckpt_itr_num = path.split('/')
     # val_vqa_result_path = os.path.join(dir_name, 'val_vqa_result')
     # if not os.path.exists(val_vqa_result_path):
@@ -222,6 +223,8 @@ def worker(rank, gpu_id, config, data_dict):
     # all_questions, all_pred_answers, all_gt_answers = [], [], []
     vqa_result = []
 
+    num_processes = config.training.num_processes
+
     train_dataloader_mmu, len_dataset_drivelm = get_drivelm_mix_modality_data_loader(
             tokenizer,
             batch_size=batch_size,
@@ -229,6 +232,8 @@ def worker(rank, gpu_id, config, data_dict):
             num_workers=1,
             world_size=1,
             local_rank=0,
+            world_size=num_processes,
+            local_rank=rank,
             max_length=2048,
             phase="tuning",
             w_clip=True,
