@@ -1,7 +1,7 @@
 wandb:
   entity: null
   resume: auto
-  run_id: 0rwv54o7
+  run_id: o9z3vo4e
 experiment:
   project: training
   name: show-o-training-stage3
@@ -75,7 +75,7 @@ lr_scheduler:
     warmup_steps: 5000
 training:
   gradient_accumulation_steps: 1
-  batch_size_t2i: 2
+  batch_size_t2i: 1
   batch_size_lm: 4
   batch_size_mmu: 10
   mixed_precision: bf16
@@ -92,4 +92,4 @@ training:
   t2i_coeff: 1.0
   lm_coeff: 0.1
   mmu_coeff: 1.0
-config: configs/showo_pretraining_stage3_pred_video.yaml
+config: configs/showo_pretraining_stage3.yaml

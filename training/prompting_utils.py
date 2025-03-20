@@ -762,6 +762,48 @@ def create_attention_mask_for_mmu_vit(
     else:
         return causal_mask
 
+def create_attention_mask_for_mmu_vit_v2(
+        sequence,
+        return_inverse_mask=True,
+        system_prompt_len=0,
+        F_mmu=None,
+        bool_pad_image_mmu=None,  
+):
+    # a0 = torch.tril(torch.ones((2, 1, 6, 6), dtype=torch.bool))
+    # a0[0, :, 2:, 2:4] = False
+
+    N, L, H = sequence.shape
+    causal_mask = torch.tril(torch.ones((N, 1, L, L), dtype=torch.bool)).to(sequence.device)
+
+    len_frame_id = 3
+    len_img_emb = 576
+    cur_id = 1 + system_prompt_len + len_frame_id
+    for cur_f in range(F_mmu):
+        cur_id = cur_id + cur_f * (len_frame_id+len_img_emb+2)
+        causal_mask[:, :, cur_id:len_img_emb+2, cur_id:len_img_emb+2] = True
+
+    for cur_n in range(N):
+        for cur_f in range(F_mmu):
+            cur_bool_pad = bool_pad_image_mmu[cur_n, cur_f]
+            if cur_bool_pad:
+                cur_pad_id = 1 + system_prompt_len + cur_f * (len_frame_id+len_img_emb+2) + len_frame_id + 1
+                causal_mask[cur_n, :, :, cur_pad_id:cur_pad_id+len_img_emb] = False
+
+    # if F_mmu is not None:
+    #     index = 1 + system_prompt_len + (2 + 1 + 576 + 1 + 2) * F_mmu
+    # else:
+    #     index = 1 + system_prompt_len + 1 + 576
+    # # TODO: PART OF SYSTEM PROMPT SHOULD BE CAUSAL ALSO
+    # causal_mask[:, :, :, :index] = 1
+    if return_inverse_mask:
+        inverted_mask = 1.0 - causal_mask.type(torch.int64)
+        inverted_mask = inverted_mask.masked_fill(
+            inverted_mask.to(torch.bool), torch.iinfo(torch.int64).min
+        )
+        return inverted_mask
+    else:
+        return causal_mask
+
 
 if __name__ == '__main__':
     pass

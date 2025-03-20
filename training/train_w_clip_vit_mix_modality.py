@@ -43,7 +43,7 @@ from training.imagenet_dataset import ImageNetDataset
 
 from models import Showo, MAGVITv2, CLIPVisionTower, get_mask_chedule
 from training.prompting_utils import UniversalPrompting, create_attention_mask_predict_next, \
-    create_attention_mask_for_mmu_vit
+    create_attention_mask_for_mmu_vit, create_attention_mask_for_mmu_vit_v2
 from models.lr_schedulers import get_scheduler
 from models.logging import set_verbosity_info, set_verbosity_error
 
@@ -390,7 +390,9 @@ def main():
         local_rank=accelerator.process_index,
         # max_length=preproc_config.max_seq_length if config.dataset.add_system_prompt else preproc_config.max_seq_length + SYSTEM_PROMPT_LEN,
         # max_length=preproc_config.max_seq_length - (576 - config.model.showo.num_vq_tokens),
-        max_length=381 + SYSTEM_PROMPT_LEN,
+        # max_length=381 + SYSTEM_PROMPT_LEN,
+        max_length=415 + SYSTEM_PROMPT_LEN,
+        # max_length=370 + SYSTEM_PROMPT_LEN,
         phase="tuning",
         w_clip=True
     )
@@ -600,10 +602,16 @@ def main():
                 B_mmu, F_mmu = pixel_values_mmu.shape[:2]
 
                 frame_name_list, frame_ids_list = [], []
+                # for cur_frame in range(F_mmu):
+                #     cur_frame_name = "frame {}".format(cur_frame)
+                #     cur_frame_ids = tokenizer(cur_frame_name)['input_ids']
+                #     frame_name_list.append(cur_frame_name)
+                #     frame_ids_list.append(cur_frame_ids)
+                frame_name_list = ["pre image 0", "current image 1", "future image 2", "future image 3"]
                 for cur_frame in range(F_mmu):
-                    cur_frame_name = "frame {}".format(cur_frame)
+                    cur_frame_name = frame_name_list[cur_frame]
                     cur_frame_ids = tokenizer(cur_frame_name)['input_ids']
-                    frame_name_list.append(cur_frame_name)
+                    # frame_name_list.append(cur_frame_name)
                     frame_ids_list.append(cur_frame_ids)
                 frame_ids = torch.tensor(frame_ids_list).to(accelerator.device, non_blocking=True)
 
@@ -633,7 +641,7 @@ def main():
                     temp_embeddings_list.append(text_embeddings[:, 1 + SYSTEM_PROMPT_LEN:2 + SYSTEM_PROMPT_LEN, :])
                     temp_embeddings_list.append(images_embeddings[:, cur_frame])
                     temp_embeddings_list.append(text_embeddings[:, 2 + SYSTEM_PROMPT_LEN:3 + SYSTEM_PROMPT_LEN, :])
-                    temp_embeddings_list.append(frame_ids_embeddings[:, cur_frame])
+                    # temp_embeddings_list.append(frame_ids_embeddings[:, cur_frame])
                 temp_embeddings_list.append(text_embeddings[:, 3 + SYSTEM_PROMPT_LEN:, :])
                 input_embeddings = torch.cat(temp_embeddings_list, dim=1)
 
@@ -645,7 +653,7 @@ def main():
                     temp_labels_list.append((torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device))  # soi
                     temp_labels_list.append(torch.ones_like(images_embeddings[:, cur_frame, :, 0]) * uni_prompting.ignore_id)  # ignore image embedding
                     temp_labels_list.append((torch.ones(input_ids_mmu.shape[0], 1) * uni_prompting.ignore_id).to(accelerator.device))  # eoi
-                    temp_labels_list.append(torch.ones_like(frame_ids_embeddings[:, cur_frame, :, 0]) * uni_prompting.ignore_id)  # ignore image embedding                
+                    # temp_labels_list.append(torch.ones_like(frame_ids_embeddings[:, cur_frame, :, 0]) * uni_prompting.ignore_id)  # ignore image embedding                
                 temp_labels_list.append(labels_mmu.to(accelerator.device))
                 labels_mmu = torch.cat(temp_labels_list, dim=1).long()
 
@@ -661,7 +669,8 @@ def main():
             else:
                 raise NotImplementedError
 
-            attention_mask_mmu = create_attention_mask_for_mmu_vit(input_embeddings, system_prompt_len=SYSTEM_PROMPT_LEN, F_mmu=F_mmu)
+            # attention_mask_mmu = create_attention_mask_for_mmu_vit(input_embeddings, system_prompt_len=SYSTEM_PROMPT_LEN, F_mmu=F_mmu)
+            attention_mask_mmu = create_attention_mask_for_mmu_vit_v2(input_embeddings, system_prompt_len=SYSTEM_PROMPT_LEN, F_mmu=F_mmu, bool_pad_image_mmu=bool_pad_image_mmu)
             attention_mask_mmu = attention_mask_mmu.to(mask_dtype)
             # attention_mask = torch.cat([attention_mask, attention_mask_mmu], dim=0)
             attention_mask = attention_mask_mmu

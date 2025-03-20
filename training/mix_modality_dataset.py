@@ -291,6 +291,8 @@ class MixModalityDataset(Dataset):
                         or "back" in cur_answer:
                             continue
 
+                        # if "What is the future state of" in Question[idx]:
+                        #     print()
 
                         self.questions.append(Question[idx])
                         self.answers.append([Answer[idx]])
@@ -318,7 +320,8 @@ class MixModalityDataset(Dataset):
         #     # if "What is the movement of object <c2,CAM_FRONT,0.62,0.53>?" in cur_question:
         #     # if "What is the movement of object <c1,CAM_FRONT,0.64,0.52>?" in cur_question:
         #     # if "What is the movement of object <c4,CAM_FRONT,0.53,0.50>?" in cur_question:
-        #     if "Is it necessary for the ego vehicle to take <c4,CAM_FRONT,0.74,0.43> into account?" in cur_question:
+        #     # if "Is it necessary for the ego vehicle to take <c4,CAM_FRONT,0.74,0.43> into account?" in cur_question:
+        #     if "What is the future state of" in cur_question:
         #         all_idx.append(idx_question)
 
         # print()
@@ -348,6 +351,7 @@ class MixModalityDataset(Dataset):
         # i = 5353
         # i = 8616
         # i = 7465
+        i = 14
 
 
         cur_question = self.questions[i]
@@ -407,29 +411,29 @@ class MixModalityDataset(Dataset):
                 cur_image = expand2square(cur_image, tuple(int(x*255) for x in self.clip_image_processor.image_mean))
                 
 
-                # cur_image_copy = cur_image.copy()
+                cur_image_copy = cur_image.copy()
                 # resolution = 256
                 # from torchvision import transforms
                 # cur_image_copy = transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BICUBIC)(cur_image_copy)
                 # cur_image_copy = transforms.CenterCrop((resolution, resolution))(cur_image_copy)
-                # if cur_timestamp == 1:
-                #     def convert_string(input_string):
-                #         pattern = r"<([^>]+),(\d+\.\d+),(\d+\.\d+)>"
-                #         match = re.search(pattern, input_string)
-                #         string_value, float_value1, float_value2 = match.group(1, 2, 3)
-                #         float_value1 = float(float_value1)
-                #         float_value2 = float(float_value2)
-                #         return float_value1, float_value2
+                if cur_timestamp == 1:
+                    def convert_string(input_string):
+                        pattern = r"<([^>]+),(\d+\.\d+),(\d+\.\d+)>"
+                        match = re.search(pattern, input_string)
+                        string_value, float_value1, float_value2 = match.group(1, 2, 3)
+                        float_value1 = float(float_value1)
+                        float_value2 = float(float_value2)
+                        return float_value1, float_value2
 
-                #     x_range_0_1, y_range_0_1 = convert_string(cur_question)
-                #     point_coordinates = (int(cur_image_copy.size[0]*x_range_0_1), int(cur_image_copy.size[1]*y_range_0_1))  # x, y coordinates
-                #     draw = ImageDraw.Draw(cur_image_copy)
-                #     point_color = (255, 0, 0)  # Red color
-                #     point_size = 5  # Size of the point
-                #     draw.rectangle([point_coordinates[0] - point_size, point_coordinates[1] - point_size,
-                #                     point_coordinates[0] + point_size, point_coordinates[1] + point_size], 
-                #                 fill=point_color)
-                # cur_image_copy.save('orig_{}.jpg'.format(cur_timestamp))
+                    x_range_0_1, y_range_0_1 = convert_string(cur_question)
+                    point_coordinates = (int(cur_image_copy.size[0]*x_range_0_1), int(cur_image_copy.size[1]*y_range_0_1))  # x, y coordinates
+                    draw = ImageDraw.Draw(cur_image_copy)
+                    point_color = (255, 0, 0)  # Red color
+                    point_size = 5  # Size of the point
+                    draw.rectangle([point_coordinates[0] - point_size, point_coordinates[1] - point_size,
+                                    point_coordinates[0] + point_size, point_coordinates[1] + point_size], 
+                                fill=point_color)
+                cur_image_copy.save('orig_{}.jpg'.format(cur_timestamp))
 
 
                 cur_image = image_transform(cur_image)
@@ -698,10 +702,34 @@ class DriveLMMixModalityDataset(Dataset):
         # self.temporal_length = 6
         # past_length = 3
         # future_length = 3
-        self.temporal_length = 2
+
+        # self.temporal_length = 2
+        # self.past_length = 2
+        # future_length = 0
+        # sample_rate = 2
+
+        self.temporal_length = 4
         self.past_length = 2
-        future_length = 0
+        future_length = 2
         sample_rate = 2
+
+        # prepend_question = "<image>\nThese {} images are the ".format(self.temporal_length)
+        # for cur_frame in range(self.temporal_length):
+        #     if self.past_length > 1:
+        #         if cur_frame < self.past_length - 1:
+        #             prepend_question = prepend_question + "pre image {}, ".format(cur_frame)
+        #         elif cur_frame == self.past_length - 1:
+        #             prepend_question = prepend_question + "current image {}, ".format(cur_frame)
+        #         elif cur_frame == self.temporal_length - 1:
+        #             prepend_question = prepend_question + " and frame {} ".format(cur_frame)
+        #         else:
+        #             prepend_question = prepend_question + ", frame {}".format(cur_frame)
+
+        # prepend_question = "<image>\nThese {} images are the ".format(self.temporal_length)
+        # prepend_question = prepend_question + "arranged in chronological order of CAM_FREONT from ego vehicle. Given frame {} as the current frame. ".format(self.past_length-1)
+        
+        prepend_question = "<image>\nThese 4 images are the pre image 0, current image 1, future image 2 and future image 3 arranged in chronological order of CAM_FREONT from ego vehicle. Please answer questions based on current image 1 <image>\n"
+        self.prepend_question = prepend_question
 
         # self.annotation = json.load(open('data/drivelm_train.json', "r"))
         self.annotation = json.load(open('data/converted_drivelm_train_range_zero_one.json', "r"))
@@ -813,11 +841,13 @@ class DriveLMMixModalityDataset(Dataset):
         cur_question = cur_question[3:]
         cur_answer = cur_answer[3:]
 
+
         sources = {
             "conversations": [
                 {
                     "from": "human",
-                    "value": "<image>\nGiven <frame {}> as the current frame. ".format(self.past_length-1) + cur_question
+                    # "value": "<image>\nGiven <frame {}> as the current frame. ".format(self.past_length-1) + cur_question
+                    "value": self.prepend_question + cur_question
                 },
                 {
                     "from": "gpt",

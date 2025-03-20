@@ -559,7 +559,7 @@ def main():
 
         image_tokens = image_tokens.view(B, F, image_tokens.shape[-1])
         image_tokens_future = image_tokens[:, F_past:]
-        image_tokens_future = image_tokens_future.view(-1, *image_tokens_future.shape[2:])
+        image_tokens_future = image_tokens_future.contiguous().view(-1, *image_tokens_future.shape[2:])
 
         # create MLM mask and labels
         input_ids, labels, loss_weight, mask_prob = mask_or_random_replace_tokens(
